@@ -22,21 +22,15 @@ const label = issue.label.replace(/\s*周报\s*$/, '');
 const overviewLink = baseUrl
   ? `${baseUrl}/${weeklyRoute(issue, 'overview')}`
   : '周报总览链接待上线后补充';
-const top = page => page.stories.slice(0, 2).map(story => story.title);
+const summary = page => page.title || page.stories.slice(0, 2).map(story => story.title).join('；');
 const groupPages = issue.pages.filter(page => page.id !== 'external');
-const groupLabels = groupPages.map(page => page.label).join('、');
 const externalPage = issue.pages.find(page => page.id === 'external');
 
 const lines = [
-  `AgentHub ${label}周报已生成。`,
-  statusLine,
-  '',
-  `本期覆盖${groupLabels}与外部资讯。全刊总览入口：${overviewLink}`,
-  '',
-  ...groupPages.map(page => `【${page.label}】${top(page).join('；')}。`),
-  `【外部资讯】${top(externalPage).join('；')}。`,
-  '',
-  publicationCheck,
+  `AgentHub ${label}周报已上线`,
+  overviewLink,
+  ...groupPages.map(page => `【${page.label}】${summary(page)}`),
+  ...(externalPage ? [`【外部资讯】${summary(externalPage)}`] : []),
 ];
 await writeFile(path.resolve(outputFile), lines.join('\n') + '\n');
 if (splitDir) {
