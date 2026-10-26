@@ -50,7 +50,7 @@ node "$SKILL_DIR/scripts/weekly-window.mjs" --from 2026-10-19 --through 2026-10-
 
 ## 6. 跑通周报与原始讨论节选
 
-`$GROUPS` 填本周有读者版面的群（如 `group-1,group-2,group-3,group-4,group-5`），`FROM` 和 `THROUGH` 填起止日期：
+`$GROUPS` 填本周有周报版面的群（默认由 `newspaper/lib/groups.mjs` 的 `weeklyGroups` 决定，包含日常群 `group-1` 到 `group-5` 以及专项群 `group-6` AI Safety、`group-7` Robot、`group-8` AI4S），`FROM` 和 `THROUGH` 填起止日期：
 
 ```sh
 WX_ACTIVITY_HOME="$WX_HOME" node "$PIPELINE/collect-batch.mjs" FROM THROUGH "$BATCH"

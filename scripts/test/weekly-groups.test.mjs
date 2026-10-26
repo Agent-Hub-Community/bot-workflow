@@ -52,19 +52,20 @@ const week = (from, count) => Array.from({ length: count }, (_, i) =>
   new Date(Date.parse(`${from}T00:00:00Z`) + i * 86400000).toISOString().slice(0, 10));
 const groupsIn = request => request.messages[0].content.match(/群别：(group-\d+)/)[1];
 
-test('weekly drafts default to the groups with a section that week, including 五群 from its first section week', async t => {
+test('weekly drafts default to the groups with a weekly section that week, including 五群 and topical groups from their start dates', async t => {
   const f = await fixture(t, () => page);
   const before = week('2026-10-12', 7), after = week('2026-10-19', 7);
   const four = ['group-1', 'group-2', 'group-3', 'group-4'];
+  const topical = ['group-6', 'group-7', 'group-8'];
   await writeInputs(f.dir, Object.fromEntries([
     ...before.map(date => [date, date >= '2026-10-16' ? [...four, 'group-5'] : four]),
-    ...after.map(date => [date, [...four, 'group-5']]),
+    ...after.map(date => [date, date >= '2026-10-21' ? [...four, 'group-5', ...topical] : [...four, 'group-5']]),
   ]));
 
   await f.run('generate-weekly-gemini.mjs', ['2026-10-19', '2026-10-25', f.dir, path.join(f.dir, 'late')]);
-  assert.deepEqual(f.requests.map(groupsIn).sort(), [...four, 'group-5']);
+  assert.deepEqual(f.requests.map(groupsIn).sort(), [...four, 'group-5', ...topical]);
   assert.deepEqual((await readdir(path.join(f.dir, 'late'))).filter(name => /^group-\d\.json$/.test(name)).sort(),
-    [...four, 'group-5'].map(id => `${id}.json`));
+    [...four, 'group-5', ...topical].map(id => `${id}.json`));
 
   f.requests.length = 0;
   await f.run('generate-weekly-gemini.mjs', ['2026-10-12', '2026-10-18', f.dir, path.join(f.dir, 'early')]);

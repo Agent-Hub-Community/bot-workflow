@@ -10,6 +10,9 @@ export const chatrooms = {
   'group-3': 'GROUP-3-CHATROOM-ID@chatroom',
   'group-4': 'GROUP-4-CHATROOM-ID@chatroom',
   'group-5': 'GROUP-5-CHATROOM-ID@chatroom',
+  'group-6': 'GROUP-6-CHATROOM-ID@chatroom',
+  'group-7': 'GROUP-7-CHATROOM-ID@chatroom',
+  'group-8': 'GROUP-8-CHATROOM-ID@chatroom',
 };
 
 // Member hashes (memberKey in the newspaper's lib/activity.mjs) of accounts that post the daily updates and relay outside links

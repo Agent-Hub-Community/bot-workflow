@@ -6,7 +6,8 @@ import { load } from '../lib/newspaper-root.mjs';
 import { modelMessages } from '../lib/weekly-discussion.mjs';
 const { validateEmphasis } = await load('lib/emphasis.mjs');
 const { modelInput } = await load('lib/image-messages.mjs');
-const { collectedGroups, groupIds, isGroupId, pageGroups } = await load('lib/groups.mjs');
+const { collectedGroups, groupIds, isGroupId, pageGroups, weeklyGroups } = await load('lib/groups.mjs');
+const weeklySectionGroups = weeklyGroups || pageGroups;
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const [from, through, inputDirArg, outputDirArg] = process.argv.slice(2);
@@ -23,10 +24,10 @@ for (let time = Date.parse(`${from}T00:00:00Z`); time <= Date.parse(`${through}T
   dates.push(new Date(time).toISOString().slice(0, 10));
 }
 if (!dates.length || dates.length > 31) throw new Error('Expected a date range of 1-31 days');
-// By default every group with a reader section on any day of the range, from the newspaper's lib/groups.mjs.
+// By default every group with a weekly reader section on any day of the range, from the newspaper's lib/groups.mjs.
 const groupsFlag = process.argv.indexOf('--groups');
 const groups = groupsFlag >= 0 ? process.argv[groupsFlag + 1].split(',')
-  : groupIds.filter(id => dates.some(date => pageGroups(date).some(group => group.id === id)));
+  : groupIds.filter(id => dates.some(date => weeklySectionGroups(date).some(group => group.id === id)));
 for (const group of groups) if (!isGroupId(group)) throw new Error(`Unknown group: ${group}`);
 if (!groups.length) throw new Error('Expected at least one group');
 await mkdir(outputDir, { recursive: true, mode: 0o700 });
