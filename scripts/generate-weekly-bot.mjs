@@ -23,14 +23,17 @@ const overviewLink = baseUrl
   ? `${baseUrl}/${weeklyRoute(issue, 'overview')}`
   : '周报总览链接待上线后补充';
 const summary = page => page.title || page.stories.slice(0, 2).map(story => story.title).join('；');
-const groupPages = issue.pages.filter(page => page.id !== 'external');
+const mainPages = issue.pages.filter(page => /^group-[1-5]$/.test(page.id));
+const topicalPages = issue.pages.filter(page => page.id !== 'external' && !/^group-[1-5]$/.test(page.id));
 const externalPage = issue.pages.find(page => page.id === 'external');
 
 const lines = [
   `AgentHub ${label}周报已上线`,
   overviewLink,
-  ...groupPages.map(page => `【${page.label}】${summary(page)}`),
-  ...(externalPage ? [`【外部资讯】${summary(externalPage)}`] : []),
+  '',
+  ...mainPages.map(page => `【${page.label}】${summary(page)}`),
+  ...(topicalPages.length ? ['', ...topicalPages.map(page => `【${page.label}】${summary(page)}`)] : []),
+  ...(externalPage ? ['', `【外部资讯】${summary(externalPage)}`] : []),
 ];
 await writeFile(path.resolve(outputFile), lines.join('\n') + '\n');
 if (splitDir) {
