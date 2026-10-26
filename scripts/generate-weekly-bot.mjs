@@ -19,13 +19,9 @@ const publicationCheck = baseUrl
   ? '- 外部资讯和周榜使用本期独立入口，发送前再次确认页面可打开。'
   : '- 外部资讯和周榜使用本期独立入口；本地预览阶段不发送。';
 const label = issue.label.replace(/\s*周报\s*$/, '');
-const pageName = id => id === 'external' ? 'external' : id;
-const pageLink = (label, page) => baseUrl
-  ? `${baseUrl}/${weeklyRoute(issue, pageName(page.id))}`
-  : '周报链接待上线后补充';
-const rankLink = page => baseUrl
-  ? `${baseUrl}/${weeklyRoute(issue, 'rank')}#${page.id}`
-  : `${page.label}活跃榜链接待上线后补充`;
+const overviewLink = baseUrl
+  ? `${baseUrl}/${weeklyRoute(issue, 'overview')}`
+  : '周报总览链接待上线后补充';
 const top = page => page.stories.slice(0, 2).map(story => story.title);
 const groupPages = issue.pages.filter(page => page.id !== 'external');
 const groupLabels = groupPages.map(page => page.label).join('、');
@@ -35,12 +31,10 @@ const lines = [
   `AgentHub ${label}周报已生成。`,
   statusLine,
   '',
-  `本期覆盖${groupLabels}。内容按整周原始消息整理，独立话题保留并列，不把没有明确后续的讨论硬串成一条。`,
+  `本期覆盖${groupLabels}与外部资讯。全刊总览入口：${overviewLink}`,
   '',
-  ...groupPages.map(page => `【${page.label}】${top(page).join('；')}。${pageLink(`${page.label}周报`, page)}`),
-  `【外部资讯】${top(externalPage).join('；')}。${pageLink('外部资讯周报', externalPage)}`,
-  '',
-  `本期活跃榜（分群）：${groupPages.map(rankLink).join('；')}。`,
+  ...groupPages.map(page => `【${page.label}】${top(page).join('；')}。`),
+  `【外部资讯】${top(externalPage).join('；')}。`,
   '',
   publicationCheck,
 ];
