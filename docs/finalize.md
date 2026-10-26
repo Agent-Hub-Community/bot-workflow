@@ -1,12 +1,14 @@
-# 群稿终稿与审核凭证
+# 群稿定稿与审核回执
 
-`finalize-batch.mjs` 把已编辑群稿与明确指定的附件合成待审快照。reviewer 审阅快照后，显式运行 `review --approve`，再由 `finalize` 校验当前输入并生成终稿。三个步骤均不调用模型或网络，不改原稿，也不写 newspaper 的 `data/`。
+模型写完初稿、主编改完错并挑好资料和讨论节选后，用 `scripts/finalize-batch.mjs` 把它们组装成最终给网页构建用的 `issues.json`。
 
-审核凭证用于发现修改和漏审，不验证 reviewer 的身份，也不代替事实核验。任何能写本地文件的人都能生成凭证。发布仍需要维护者针对当前刊期的明确授权。
+它分三步走：`candidate` 先把正文、原始证据和要挂载的附件打包成一份待审快照；审稿人看过快照后，跑 `review --approve` 签出一份回执；最后 `finalize` 核对当前目录和回执一字不差，才写出 `final/issues.json` 和 `final/receipt.json`。三步都不联网、不调模型，也不去改原始初稿或 `newspaper/data/`。
 
-## 输入契约
+说明白一点：这份回执是防手滑用的——比如改了正文忘了更新重点、或者挂错了别的群的讨论，脚本能立刻拦住。但它不是密码学签名，任何能写本机文件的人都能跑命令生成回执；真正能不能推上线，还是看维护者对当期内容的人工把关。
 
-批次目录保留 package 阶段的布局。日期按实际刊期填写。
+## 目录与输入
+
+批次目录保持 `prepare-week-d.mjs package` 跑完后的结构（日期换成实际刊期）：
 
 ```text
 BATCH/
@@ -19,19 +21,18 @@ BATCH/
     group-5.draft.json
 ```
 
-`issues.json` 保存当前编辑后的群稿，包括标题、正文、版头及排序。finalizer 要求日期对应的全部读者群，空组保留空 `stories`。群列表取自 newspaper 的 `lib/groups.mjs`。外部资讯走已有 external workflow，不放进这份群稿输入。
+- `issues.json` 是当前改定后的群稿（标题、正文、版头和文章顺序）。当天所有有读者版面的群都要在里面（群列表来自 `newspaper/lib/groups.mjs`），当天没内容的群留空 `stories: []`。外部资讯走它自己的导入脚本，不放在这里。
+- 每个群的 `.draft.json` 保留模型当初给的 `topic_key`、`evidence_ids` 和 `claims`，里面引用的消息 ID 都能在同日同群的 `.input.json` 里找到。这些内部字段只用来对账，不会进最终的 `issues.json`。
 
-每个 `.draft.json` 应保留 `topic_key`、`evidence_ids` 和 `claims`。每条证据应存在于同日同群 `.input.json`。这些私有字段不进入最终 `issues.json`。
-
-附件 manifest 单独保存。每条当前稿件都要明确指定下面的四元组。
+要挂到每条稿子上的资料链接、原始讨论、重点和 AI 锐评，单独写成一个 `attachments.json`。每条稿子靠下面四个字段对号入座：
 
 ```text
 (date, group, topic_key, feedbackId)
 ```
 
-`topic_key` 指向原 draft 的话题，`feedbackId` 指向当前标题和正文。finalizer 调用 newspaper 的 `feedbackId(date, group, story)`，不按标题相似度或文章序号猜配对。首次建立映射也由编辑明确指定。改标题或正文后，应重新计算该条的 `feedbackId` 并更新映射。
+`topic_key` 对应 `.draft.json` 里的原始话题，`feedbackId` 由 `newspaper/lib/feedback-id.mjs` 根据当前日期、群、标题和正文算出。脚本不靠标题长相或排列顺序去猜哪条对哪条；如果你改了某条的标题或正文，`feedbackId` 就会变，记得同步更新 `attachments.json` 里的对应值。
 
-下面的 manifest 是形状示例，`feedbackId` 需要替换为实际计算值。
+`attachments.json` 长这样：
 
 ```json
 {
@@ -50,22 +51,22 @@ BATCH/
         }
       ],
       "discussion": [
-        { "speaker": 1, "time": "10:00", "text": "经审核的匿名原话。" }
+        { "speaker": 1, "time": "10:00", "text": "审过的匿名原话。" }
       ],
-      "emphasis": ["逐字匹配的原文片段"],
-      "aiComment": "经审核的完整锐评。"
+      "emphasis": ["正文里逐字出现的片段"],
+      "aiComment": "审过的 AI 锐评。"
     }
   ]
 }
 ```
 
-`resources`、`discussion`、`emphasis` 和 `aiComment` 应全部明确提供。前三项可用 `[]` 表示不附加内容。manifest 覆盖当前稿件的这些字段，避免旧附件留在终稿里。资源类型 `kind` 只接受读者页面可显示的 `paper`、`article`、`code`、`demo`、`discussion`。资源 URL 默认应出现在该话题的证据中，并满足 HTTPS、无凭据、无查询参数的读者契约。程序不访问 URL，也不证明资源与结论相符，reviewer 应核验两者。
+几个字段的要求：
 
-如果从原分享页核实了不同的官方地址，在该条 manifest 增加 `resourceEvidence`。每项包含 `url`（采用地址）、`sourceUrl`（该话题证据中的原地址）、`reviewer`、`reviewedAt`（ISO 时间）和 `basis`（核验依据）。例如，编辑读过转发页及项目官网后，写明原页如何指向项目。无核验记录时，finalizer 拒绝原证据中没有的地址。记录也进入完整审核快照；修改依据或地址后需要重审。
-
-匿名讨论使用 newspaper 的 `validateStoryDiscussion` 契约。它只接受 `speaker`、`time`、`text`、可选 `quote`。每日时间用 `HH:mm`；引用含 `speaker` 和 `text`。私有来源标识留在输入或讨论审计中。结构校验不能证明引文忠实，也不能自动识别人名，reviewer 应对照证据检查隐私与归属。
-
-删除话题后，应删除读者稿中的对应条目，并在 manifest 明确排除原话题。
+- `resources`、`discussion`、`emphasis` 和 `aiComment` 四个字段都要写全；前三个如果某条没有，就显式写成 `[]`。脚本会拿这里的内容覆盖 `issues.json` 上的同名字段，免得残留旧数据。
+- `resources[].kind` 只认网页能画出来的五种：`paper`、`article`、`code`、`demo`、`discussion`。URL 得是無账号密码、无查询参数的 `https://` 地址，而且默认要在该条目的原始证据消息里逐字出现过。
+- 如果群友发的是带追踪参数的分享链接，或者你在转帖里核实到了官方主站地址，需要在该条下面加一段 `resourceEvidence`，写明采用的地址 `url`、证据里的原地址 `sourceUrl`、审核人 `reviewer`、ISO 时间 `reviewedAt` 和核实依据 `basis`。没有这条记录，脚本不收证据里没出现过的新 URL。
+- `discussion` 用 `newspaper` 的讨论校验规则：只留 `speaker`（从 1 开始的整数）、`time`（`HH:mm`）、`text` 和可选的 `quote`（`{ speaker, text }`）。
+- 如果审稿时删掉了初稿里的某个话题，除了从 `issues.json` 拿掉，还要在 `attachments.json` 里显式记一笔排除，这样脚本知道你是故意删的，不是漏配了：
 
 ```json
 {
@@ -73,17 +74,17 @@ BATCH/
   "group": "group-1",
   "topic_key": "removed-topic",
   "exclude": true,
-  "reason": "编辑决定删除的具体原因"
+  "reason": "两句闲聊，没有实质信息"
 }
 ```
 
-每个原话题应恰好出现一次，每条当前稿件也应恰好匹配一次。缺项、重复项、未知话题和过期 `feedbackId` 均会失败。新增话题需要对应的模型 draft 和输入证据；不要给无来源稿件补造映射。
+初稿里的每个 `topic_key` 和当前 `issues.json` 里的每条故事都得刚好对上一次，多一条、少一条或 `feedbackId` 算不上都会报错。
 
-## 三步执行
+## 三步命令
 
-警告：candidate 与 receipt 包含完整私有输入和原稿，不应提交到公开仓库或放入静态预览目录。
+警告：`candidate` 和 `receipt` 文件里打包了完整的私有聊天输入和模型原稿，只留在本机批次目录，不要放进预览静态站或提交到公开仓库。
 
-1. 生成待审快照。
+1. 生成待审快照：
 
    ```bash
    node "$BOT/scripts/finalize-batch.mjs" candidate \
@@ -91,9 +92,9 @@ BATCH/
      --out "$BATCH/candidate-v1.json"
    ```
 
-   candidate 的状态是 `pending`。`snapshot.issues` 是将要生成的完整读者稿，其他字段保留输入、来源和映射供核对。
+   生成的 `candidate-v1.json` 里，`snapshot.issues` 就是组装后的读者稿，`snapshot` 的其余字段存着输入和证据供核对。
 
-2. 审阅完整快照后，显式记录 reviewer。
+2. 看过快照确认无误后，签出审核回执：
 
    ```bash
    node "$BOT/scripts/finalize-batch.mjs" review \
@@ -101,9 +102,9 @@ BATCH/
      --reviewer "实际审稿人" --approve --out "$BATCH/review-v1.json"
    ```
 
-   无 `--approve` 或无 reviewer 时不会生成凭证。该命令不重新读批次目录，签署的是给定 candidate 中的准确快照。
+   这一步只对指定的 `candidate-v1.json` 盖章，不重读目录。
 
-3. 用当前输入和凭证生成终稿。
+3. 对照当前目录和回执，输出终稿：
 
    ```bash
    node "$BOT/scripts/finalize-batch.mjs" finalize \
@@ -111,35 +112,25 @@ BATCH/
      --review "$BATCH/review-v1.json" --out "$BATCH/final"
    ```
 
-   结果为 `final/issues.json` 和 `final/receipt.json`。finalizer 先验证全部输入，再一次性建立输出目录，失败不会留下半份终稿。
+   校验通过后会一次性写出 `$BATCH/final/issues.json` 和 `$BATCH/final/receipt.json`。
 
-这些命令要求输出父目录已存在。输出路径已存在时，只允许内容一致的幂等重跑，不覆盖其他内容。后续可在 `final/` 增加榜单与预览文件；重跑 finalizer 仍只核对 `issues.json` 与 `receipt.json`。
+哪怕标题和正文一字未改（`feedbackId` 没变），只要你动过锐评、重点、资料链接、讨论节选、版头或者文章顺序，旧回执都会失效，需要重新走一遍 `candidate-v2` → `review-v2` → `final-v2`。
 
-任何原输入、原 draft、manifest、当前稿件或终稿变化，都会让旧凭证失效。即使 `feedbackId` 没变，修改锐评、资源标签、匿名讨论、重点、版头或文章顺序，也需要新 candidate 和新审核。使用新的 `candidate-v2.json`、`review-v2.json` 和 `final-v2/`，不要改旧凭证。
+## 接着跑活跃榜和本地预览
 
-## 接入榜单与预览
+定稿之后，后面的榜单和预览都针对 `$BATCH/final` 跑，别再用外层未定稿的 `$BATCH/issues.json`。
 
-预览应读取 `final/issues.json`，不要继续读取定稿前的 `BATCH/issues.json`。finalizer 的凭证仅覆盖群稿及附件，不覆盖后续榜单和头像。
-
-单日真实批次的榜单采集器还需要同日输入。完成授权后，复制原日目录到终稿目录，再按现有榜单流程采集和审核。下面的 `DATE` 是该批次唯一日期；`prepare-release-activity.mjs` 不支持一次输入多日。只在目标日目录不存在时复制，防止重复运行时嵌套目录。
-
-警告：下面的榜单命令会读取本机微信数据。离线合成示例不运行该命令，它使用明确标为虚构的固定榜单和自绘头像。
+单日批次算活跃榜时，`prepare-release-activity.mjs` 还要读同目录底下的日期子目录。先把当天的输入目录拷进 `final/`，再算榜、审头像、合预览：
 
 ```bash
 test ! -e "$BATCH/final/$DATE" && cp -R "$BATCH/$DATE" "$BATCH/final/$DATE"
 WX_ACTIVITY_HOME="$WX_HOME" node "$BOT/pipeline/prepare-release-activity.mjs" "$BATCH/final"
+
+node "$NEWSPAPER_DIR/scripts/prepare-preview.mjs" \
+  --date "$DATE" --batch "$BATCH/final" \
+  --external-draft "$EXTERNAL_DRAFT" --external-selection "$EXTERNAL_SELECTION"
 ```
 
-1. 完成榜单和新增头像审核。
-2. 按 external workflow 生成、审阅同日外部资讯。
-3. 调用 newspaper 的现有预览命令。
+起本地静态服务器看预览时，根目录指到 `$BATCH/final/preview/`，不要指到上一层 `$BATCH/final/`（上一层有 `receipt.json` 和原始输入）。
 
-   ```bash
-   node "$NEWSPAPER_DIR/scripts/prepare-preview.mjs" \
-     --date "$DATE" --batch "$BATCH/final" \
-     --external-draft "$EXTERNAL_DRAFT" --external-selection "$EXTERNAL_SELECTION"
-   ```
-
-   newspaper 会更新自身 `dist-preview/`，并把静态文件复制到 `final/preview/`。它不启动静态服务器，也不改正式 `data/`。只有 `final/preview/` 可以作为静态服务器根目录，不要暴露包含 receipt 的父目录。
-
-现有 newspaper 的独立发布器不读取本 finalizer 的 receipt。绕过 finalizer 或在定稿后修改 `issues.json`，不会由发布器自动检测。维护者发布前应重新运行 finalizer 核对，并执行 newspaper 原有发布检查。本改动不改变历史刊期的 publish gate，也不授权发布、推送或发群。
+另外，`newspaper` 现有的 `publish-reviewed-batch.mjs` 入库脚本是为了兼容早期批次写的，本身不读 `receipt.json`。正式发布前，先重跑一次 `finalize-batch.mjs finalize` 确认终稿和回执仍然一致，再执行入库。
