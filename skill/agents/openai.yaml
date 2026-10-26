@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent Hub 日报与周报"
+  short_description: "从本机群聊和外部资讯生成社区日报或自然周周报，含 AI 锐评、活跃榜、网页预览和导览文案"
+  default_prompt: "使用 $agenthub-daily 生成昨日完整的 Agent Hub 日报：采集各群讨论和外部资讯，模型写稿并审核，计算活跃榜，完成本地网页预览并准备导览文案，暂不发布或发群。"

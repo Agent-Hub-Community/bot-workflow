@@ -1,0 +1,41 @@
+name: Test workflow
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.16.0', '24']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: bot-workflow
+      - uses: actions/checkout@v4
+        with:
+          repository: Agent-Hub-Community/newspaper
+          ref: ee11cddaec8dcddb13a94a7b2d26bdceae165be5
+          path: newspaper
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Install website dependencies
+        working-directory: newspaper
+        run: npm ci --no-audit --no-fund
+      - name: Test website contracts
+        working-directory: newspaper
+        run: npm test
+      - name: Test workflow components
+        working-directory: bot-workflow
+        run: npm test
+      - name: Run synthetic example
+        working-directory: bot-workflow
+        run: npm run example:synthetic -- --out "$RUNNER_TEMP/bot-workflow-example"

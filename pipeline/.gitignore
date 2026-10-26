@@ -1,0 +1,5 @@
+groups.private.*
+*.private.md
+*.local.*
+.env*
+node_modules

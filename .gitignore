@@ -1,0 +1,9 @@
+# 私有配置：群的 chatroom username、运营账号哈希、密钥
+groups.private.*
+*.local.*
+.env*
+
+# 批次目录：原始聊天、模型响应、审核证据
+scratch/
+
+node_modules/

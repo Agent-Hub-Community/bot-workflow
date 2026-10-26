@@ -1,0 +1,16 @@
+{
+  "name": "bot-workflow",
+  "private": true,
+  "type": "module",
+  "description": "AgentHub 的消息采集、模型写稿与显式审核流程",
+  "license": "MIT",
+  "engines": { "node": ">=22.15.0" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Agent-Hub-Community/bot-workflow.git"
+  },
+  "scripts": {
+    "test": "node --test pipeline/test/*.test.mjs scripts/test/*.test.mjs skill/scripts/*.test.mjs && node --experimental-vm-modules scripts/test/month-report.mjs && node scripts/package-month-resources.mjs --self-test",
+    "example:synthetic": "node scripts/run-synthetic-example.mjs"
+  }
+}
