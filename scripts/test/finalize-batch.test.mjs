@@ -6,7 +6,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { buildCandidate, approveCandidate, validateReview, validateReaderIssues } from '../../lib/finalize-batch.mjs';
+import { buildCandidate, validateReaderIssues } from '../../lib/finalize-batch.mjs';
 import { load } from '../../lib/newspaper-root.mjs';
 const { feedbackId } = await load('lib/feedback-id.mjs');
 const { readerPage } = await load('lib/daily-generation.mjs');
@@ -34,7 +34,7 @@ function fixture() {
   return { issues, sources, attachments, candidate() { return buildCandidate(this.issues, this.sources, this.attachments); } };
 }
 
-test('direct validation of complete reader issues without attachments or receipt', () => {
+test('direct validation of complete reader issues', () => {
   const f = fixture();
   const story = f.issues[0].pages[0].stories[0];
   Object.assign(story, {
@@ -44,16 +44,14 @@ test('direct validation of complete reader issues without attachments or receipt
     aiComment: 'The queue still needs a consumer.',
   });
   assert.deepEqual(validateReaderIssues(f.issues), f.issues);
-  const candidate = buildCandidate(f.issues);
-  assert.deepEqual(validateReview(candidate), f.issues);
+  assert.deepEqual(buildCandidate(f.issues).snapshot.issues, f.issues);
 });
 
 test('attachment manifest merges resources, discussion, emphasis and aiComment', () => {
   const f = fixture();
   const candidate = f.candidate();
   assert.equal(candidate.status, 'pending');
-  const review = approveCandidate(candidate, 'Fixture reviewer');
-  assert.deepEqual(validateReview(candidate, review), candidate.snapshot.issues);
+  assert.equal(candidate.snapshot.issues[0].pages[0].stories[0].aiComment, 'The queue still needs a consumer.');
 });
 
 test('manifest replaces stale emphasis after a body edit and unsupported resource kinds fail', () => {
@@ -81,7 +79,7 @@ test('fail closed for invalid URLs, missing group, private fields and anonymous 
   });
 });
 
-test('CLI supports one-step finalize and legacy candidate/review/finalize', async t => {
+test('CLI finalizes batch in one step', async t => {
   const directory = await mkdtemp(path.join(tmpdir(), 'finalize-batch-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const f = fixture(), file = name => path.join(directory, name);
@@ -95,13 +93,8 @@ test('CLI supports one-step finalize and legacy candidate/review/finalize', asyn
   const env = { ...process.env, DAILY_LLM_BASE_URL: 'http://127.0.0.1:1' };
   delete env.NODE_OPTIONS;
   const run = args => exec(process.execPath, [cli, ...args], { env, timeout: 10000 });
-  const common = ['--directory', directory, '--attachments', file('attachments.json')];
-  await run(['candidate', ...common, '--out', file('candidate.json')]);
-  await run(['review', '--candidate', file('candidate.json'), '--reviewer', 'Editor', '--approve', '--out', file('review.json')]);
-  await run(['finalize', ...common, '--review', file('review.json'), '--out', file('final')]);
+  await run(['--directory', directory, '--attachments', file('attachments.json'), '--out', file('final')]);
   assert.deepEqual(JSON.parse(await readFile(file('final/issues.json'), 'utf8')), f.candidate().snapshot.issues);
-
-  // One-step finalize directly on directory
   await run([directory]);
   assert.deepEqual(JSON.parse(await readFile(file('final/issues.json'), 'utf8')), f.candidate().snapshot.issues);
 });

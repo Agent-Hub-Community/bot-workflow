@@ -9,14 +9,12 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { llmModel } from '../../lib/llm.mjs';
-import { load, rootDir } from '../../lib/newspaper-root.mjs';
+import { load } from '../../lib/newspaper-root.mjs';
 
 const { externalWindow, validateExternalReview } = await load('lib/external-workflow.mjs');
 
-// The generators live here; the review receipt CLI stays in the newspaper checkout.
 const run = promisify(execFile);
 const root = fileURLToPath(new URL('../../', import.meta.url));
-const reviewExternal = path.join(rootDir, 'scripts/review-external.mjs');
 const selection = () => ({
   ...externalWindow('2026-09-26', '2026-09-26T19:00:00Z'),
   candidates: [{ id: 'product', kind: 'news', title: 'Product update', timing: 'September 25',
@@ -34,11 +32,10 @@ const draft = () => ({
     aiComment: 'The waiting room has a release date.',
     links: [{ label: '官方发布', url: 'https://example.com/release' }] }], trends: [],
 });
-test('Gemini generator and review CLI round trip, fail closed for bad model and invented URL', async t => {
+test('Gemini generator round trip, fails closed for bad model and invented URL', async t => {
   const dir = await mkdtemp(path.join(tmpdir(), 'external-workflow-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const input = path.join(dir, 'selection.json'), output = path.join(dir, 'draft.json');
-  const receipt = path.join(dir, 'review.json');
   await writeFile(input, JSON.stringify(selection()));
   let result = { model: llmModel, choices: [{ finish_reason: 'stop',
     message: { content: JSON.stringify(draft()) } }], usage: { total_tokens: 10 } };
@@ -58,8 +55,7 @@ test('Gemini generator and review CLI round trip, fail closed for bad model and 
   await generate();
   assert.equal(requests[0].model, llmModel);
   assert.deepEqual(JSON.parse(await readFile(output, 'utf8')), draft());
-  await run(process.execPath, [reviewExternal, output, input, receipt, 'Editor', '--approve']);
-  validateExternalReview(draft(), selection(), JSON.parse(await readFile(receipt, 'utf8')));
+  validateExternalReview(draft(), selection());
   result.model = 'wrong-model';
   await assert.rejects(generate(), /unexpected model/);
   await assert.rejects(readFile(output), { code: 'ENOENT' });
@@ -69,8 +65,6 @@ test('Gemini generator and review CLI round trip, fail closed for bad model and 
   result.choices[0].message.content = JSON.stringify(bad);
   await assert.rejects(generate(), /Unverified story link/);
 
-  // Spans that break the emphasis rules are dropped instead of failing the draft, and the run record
-  // names the story so the editor can pick its emphasis again.
   const overBudget = draft();
   overBudget.stories[0].emphasis = ['product', overBudget.stories[0].text, 'not in the text'];
   result.choices[0].message.content = JSON.stringify(overBudget);
@@ -135,11 +129,5 @@ test('external comments reuse the original prompt, map by ID and preserve approv
     await assert.rejects(generate(failed), /coverage mismatch|Invalid comment/);
     await assert.rejects(readFile(failed), { code: 'ENOENT' });
   }
-  const selectionFile = path.join(dir, 'selection.json'), receipt = path.join(dir, 'review.json');
-  await writeFile(selectionFile, JSON.stringify(selection()));
-  await writeFile(input, JSON.stringify({ ...data, stories: [data.stories[0]] }));
-  await assert.rejects(run(process.execPath, [
-    reviewExternal, input, selectionFile, receipt, 'Editor', '--approve',
-  ]), /AI comments/);
-  await assert.rejects(readFile(receipt), { code: 'ENOENT' });
+  assert.throws(() => validateExternalReview({ ...data, stories: [data.stories[0]] }, selection()), /AI comments/);
 });

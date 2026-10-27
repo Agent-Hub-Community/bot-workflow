@@ -65,7 +65,6 @@ export async function collectImages(date, batch, {
   const chatrooms = Object.fromEntries((groups ?? await chatGroups()).map(group => [group.id, group.username]));
   const dayDir = path.resolve(batch, date);
   const prompt = await readFile(new URL('../prompts/image-description.md', import.meta.url), 'utf8');
-  const promptHash = hash('sha256', prompt);
   const accountDir = await realpath(path.dirname((await read(path.join(home, '.wx-cli/config.json'))).db_dir));
   const cache = await read(path.join(home, '.wx-cli/cache/_mtimes.json'));
   let key;
@@ -117,7 +116,7 @@ export async function collectImages(date, batch, {
   async function describe({ page, record }) {
     const cacheFile = path.join(cacheDir, `${record.md5}.json`);
     const cached = await read(cacheFile).catch(() => null);
-    if (cached?.model === llmModel && cached.prompt === promptHash) {
+    if (cached?.description) {
       record.description = cached.description;
       return;
     }
@@ -143,7 +142,7 @@ export async function collectImages(date, batch, {
     const parsed = JSON.parse(choice.message.content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''));
     if (typeof parsed?.description !== 'string') throw new Error('image model returned no description field');
     record.description = cleanDescription(parsed.description);
-    await save(cacheFile, { model: llmModel, prompt: promptHash, description: record.description, describedAt: new Date().toISOString() });
+    await save(cacheFile, { model: llmModel, description: record.description, describedAt: new Date().toISOString() });
   }
   await Promise.all(Array.from({ length: Math.min(concurrency, jobs.length) }, async () => {
     while (jobs.length) {

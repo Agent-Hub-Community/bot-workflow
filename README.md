@@ -51,7 +51,7 @@
 
 ### 合成示例
 
-`examples/synthetic/` 里有一套编好的两天群聊和固定模型返回。跑一遍能看到输入、初稿、待审快照、审核回执、终稿和预览网页分别长什么样，不需要微信、API Key 或 Cloudflare 账号。
+`examples/synthetic/` 里有一套编好的两天群聊和固定模型返回。跑一遍能看到输入、初稿、终稿和预览网页分别长什么样，不需要微信、API Key 或 Cloudflare 账号。
 
 预览构建会改写所指 `newspaper` 克隆下的 `dist-preview/`，不要和真刊期的预览混用同一个克隆；正式的 `data/` 不会动。`--out` 放在 `newspaper` 外面，每次运行会在下面新建一个 `run-*` 目录。
 
@@ -59,7 +59,7 @@
 node scripts/run-synthetic-example.mjs --out "$BOT/../synthetic-example"
 ```
 
-跑完会打印 `runDirectory`、`finalDirectory` 和 `previewDirectory`，并写入 `result.json`。你可以对着[定稿说明](docs/finalize.md)翻看 `final/issues.json` 和 `final/receipt.json`。注意：预览站里除了合成的 10 月 20、21 日内容，还带着 `newspaper` 仓库原有的公开往期页面。
+跑完会打印 `runDirectory`、`finalDirectory` 和 `previewDirectory`，并写入 `result.json`。你可以对着[定稿说明](docs/finalize.md)翻看 `final/issues.json`。注意：预览站里除了合成的 10 月 20、21 日内容，还带着 `newspaper` 仓库原有的公开往期页面。
 
 ## 跑真刊期的准备
 
@@ -80,7 +80,7 @@ node scripts/run-synthetic-example.mjs --out "$BOT/../synthetic-example"
    cp pipeline/groups.example.mjs pipeline/groups.private.mjs
    ```
 
-   群名、何时开始采集、何时出读者版面都在 `newspaper/lib/groups.mjs` 里定义；`groups.private.mjs` 只放群号和运营账号哈希。
+   群名、何时开始采集、何时出读者版面都在 `newspaper/lib/groups.mjs` 里定义；`groups.private.mjs` 只放微信群号 `<数字>@chatroom`。
 
 4. 复制环境变量模板，填好路径和模型接口后加载。密钥可以在运行命令时从自己的密钥管理工具注入，不要写进会提交的文件。
 
@@ -132,7 +132,7 @@ node scripts/run-synthetic-example.mjs --out "$BOT/../synthetic-example"
 | 写群稿初稿 | `scripts/prepare-week-d.mjs generate` / `package` | 有没有漏掉重要讨论、把两件事合成一条，或把甲的话安到乙头上 |
 | 补锐评、报头和重点 | `scripts/enrich-month-d.mjs` | 锐评有据可依，重点片段能在正文里逐字找到 |
 | 外部资讯 | `scripts/collect-external.mjs`、`generate-external.mjs`、`generate-external-comments.mjs` | 补查脚本没扫到的来源，点开原文核对时间和数据 |
-| 审稿与定稿 | `scripts/apply-month-review.mjs`、`package-month-resources.mjs`、`finalize-batch.mjs` | 把资料链接和原始讨论挂到对应条目，核对无误后签发定稿回执 |
+| 审稿与定稿 | `scripts/finalize-batch.mjs` | 把资料链接和原始讨论挂到对应条目，校验 schema 与隐私后写出终稿 |
 | 活跃榜 | `pipeline/prepare-release-activity.mjs` | 与群稿用同一个截止时刻，逐张看新上榜头像 |
 | 预览与发布 | `newspaper` 的 `prepare-preview.mjs`、`publish-reviewed-batch.mjs` | 检查手机和桌面排版；拿到本期发布同意后再入库推送 |
 | 线上核对与导览文案 | `skill/scripts/verify-publication.mjs`、`scripts/generate-bot.mjs` | 核对线上数据与本地一致，生成发群用的导览草稿 |
@@ -184,7 +184,7 @@ prompt 和审稿规则卡了四件事：
 | 微信数据库、wx 密钥、解密缓存、API Key | 本机目录或密钥管理工具 | 绝不进任何仓库 |
 | 原始聊天 `raw.json`、成员映射、完整活跃统计 | 本机私有批次目录 | 不公开；去凭据副本只有另行同意时才归档到私有库 |
 | 去敏输入 `input.json`、解码后的群聊图片 | 本机批次目录 | 写稿时发给所配模型接口，不进公开仓库 |
-| 模型原稿、审稿记录、定稿回执 `receipt.json` | 本机批次目录 | 含原文证据，留在私有目录，不放进预览站或公开仓库 |
+| 模型原稿、审稿记录 | 本机批次目录 | 含原文证据，留在私有目录，不放进预览站或公开仓库 |
 | 定稿后的标题、正文、重点、锐评、公开资料链接 | `newspaper/data/` | 经当期同意后公开发布 |
 | 匿名讨论节选、前三名名次与审过的头像 | `newspaper/data/` | 经当期同意后公开发布；注意原话和头像仍可能让人认出是谁 |
 

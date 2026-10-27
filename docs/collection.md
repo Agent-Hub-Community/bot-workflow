@@ -78,7 +78,6 @@
 
 活跃榜只数发言次数，不管发言内容好坏。榜单脚本和读图脚本一样，以只读方式查 `$WX_HOME/.wx-cli/cache/`，所以要先跑完当天采集再算榜。
 
-- 成员键：对微信 `username` 算 SHA-256 取前 12 位十六进制（`memberKey`），只在私有统计和核对时用，不进公开数据。
 - 去重：按服务端消息 ID 跨分库去重。
 - 计分：文字、引用回复、图片、视频、语音、链接卡片、文件和合并转发，每条算 1 次；系统提示、拍一拍和表情包不计。
 - 统计口径：各群日榜按群单算；社区周榜（北京时间自然周）、月榜（自然月）和总榜把已纳入采集的群合起来算。总榜只代表这台电脑留存下来的历史。
@@ -90,6 +89,6 @@
 
 每周出周报时，顺带从这一周的群聊里捞三类候选：
 
-- 资料库候选（`collect-library-candidates.mjs`）：扫群里发过的外部链接，带上前后几句聊天上下文；设了 `WX_ACTIVITY_HOME` 时还会记下分享者的成员哈希和头像地址。我们自己用来发日报、转外链的运营号哈希配在 `groups.private.mjs` 的 `libraryOperators` 里，脚本会把它标成运营转发，只有没别的群友发过同一链接时才算数，而且不挂运营号头像。
+- 资料库候选（`collect-library-candidates.mjs`）：扫群里发过的外部链接，带上前后几句聊天上下文；设了 `WX_ACTIVITY_HOME` 时还会记下分享者的匿名编号和头像地址。
 - 机会候选（`collect-opportunity-candidates.mjs`）和黑话分块（`collect-glossary-chunks.mjs`）：直接从每天的 `input.json` 抽，不再读微信库。
 - 候选文件都带聊天上下文，只放在 `newspaper/scratch/` 下。怎么审、怎么合进 `newspaper/data/`，看 `newspaper` 仓库的 [`docs/review/library.md`](https://github.com/Agent-Hub-Community/newspaper/blob/main/docs/review/library.md)、[`opportunities.md`](https://github.com/Agent-Hub-Community/newspaper/blob/main/docs/review/opportunities.md) 和 [`glossary.md`](https://github.com/Agent-Hub-Community/newspaper/blob/main/docs/review/glossary.md)。

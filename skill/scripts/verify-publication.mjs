@@ -21,7 +21,12 @@ export async function pageGroupIds(newspaper, date) {
   return ids;
 }
 
-export function checkEdition(data, date, { groups, rankThrough = date }) {
+export async function optionalGroupIds(newspaper, date) {
+  const { optionalPageGroups } = await import(pathToFileURL(path.join(path.resolve(newspaper), 'lib/groups.mjs')).href);
+  return typeof optionalPageGroups === 'function' ? optionalPageGroups(date).map(group => group.id) : [];
+}
+
+export function checkEdition(data, date, { groups, optionalGroups = [], rankThrough = date }) {
   for (const value of [date, rankThrough]) {
     assert.match(value, /^\d{4}-\d{2}-\d{2}$/);
     assert.equal(new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10), value);
@@ -31,9 +36,11 @@ export function checkEdition(data, date, { groups, rankThrough = date }) {
   const issues = data.digests.filter(issue => issue.date === date);
   assert.equal(issues.length, 1, 'Target edition missing or duplicated');
   const issue = issues[0];
-  assert.deepEqual(issue.pages.map(p => p.id).sort(), ['external', ...groups].sort());
+  const optionalSet = new Set(optionalGroups);
+  assert.deepEqual(issue.pages.map(p => p.id).filter(id => !optionalSet.has(id)).sort(), ['external', ...groups].sort());
   const counts = Object.fromEntries(issue.pages.map(p => {
     assert.ok(Array.isArray(p.stories), `Missing stories for ${p.id}`);
+    if (optionalSet.has(p.id)) assert.ok(p.stories.length > 0, `Optional group ${p.id} must not be empty`);
     for (const story of p.stories) {
       for (const field of ['title', 'text', 'aiComment']) assert.ok(story[field]?.trim(), `Missing ${field}`);
       assert.match(story.feedbackId, /^[a-f0-9]{32}$/);
@@ -88,7 +95,11 @@ export async function verify({ newspaper, site, date, rankThrough = date, out })
     assert.ok(live.startsWith(head), 'Unexpected issue script format; inspect current build format');
     index.pages = JSON.parse(live.slice(head.length).replace(/;\s*$/, '')).pages;
   }
-  const counts = checkEdition(data, date, { groups: await pageGroupIds(root, date), rankThrough });
+  const counts = checkEdition(data, date, {
+    groups: await pageGroupIds(root, date),
+    optionalGroups: await optionalGroupIds(root, date),
+    rankThrough,
+  });
   validatePublicActivity(data.activity, data.digests);
   const receipt = {
     verifiedAt: new Date().toISOString(), site: base.href, date, rankThrough,

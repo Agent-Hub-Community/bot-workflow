@@ -3,10 +3,10 @@ import { readFile, writeFile, mkdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { rootDir } from '../lib/newspaper-root.mjs';
-import { buildCandidate, approveCandidate, validateReview, validateReaderIssues } from '../lib/finalize-batch.mjs';
+import { buildCandidate, validateReaderIssues } from '../lib/finalize-batch.mjs';
 
 const args = process.argv.slice(2);
-const mode = ['candidate', 'review', 'finalize'].includes(args[0]) ? args.shift() : 'finalize';
+if (['candidate', 'review', 'finalize'].includes(args[0])) args.shift();
 const { values, positionals } = parseArgs({
   args,
   allowPositionals: true,
@@ -33,45 +33,34 @@ const saveJson = async (file, value) => {
   await writeFile(file, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 });
 };
 
-async function loadCandidate() {
+let issues;
+if (values.candidate) {
+  const candidate = await json(values.candidate);
+  issues = validateReaderIssues(candidate.snapshot ? candidate.snapshot.issues : candidate);
+} else {
   assert.ok(directory, 'Provide batch directory');
-  const issues = await json(path.join(directory, 'issues.json'));
-  const attachmentsFile = values.attachments ? path.resolve(values.attachments) : null;
-  if (!attachmentsFile) {
-    validateReaderIssues(issues);
-    return { version: 1, status: 'pending', snapshot: { issues } };
-  }
-  const sources = [];
-  for (const issue of issues) {
-    for (const page of issue.pages) {
-      const draftPath = path.join(directory, issue.date, `${page.id}.draft.json`);
-      const draft = await json(draftPath).catch(() => null);
-      if (draft) sources.push({ date: issue.date, group: page.id, draft });
+  const rawIssues = await json(path.join(directory, 'issues.json'));
+  if (!values.attachments) {
+    issues = validateReaderIssues(rawIssues);
+  } else {
+    const sources = [];
+    for (const issue of rawIssues) {
+      for (const page of issue.pages) {
+        const draftPath = path.join(directory, issue.date, `${page.id}.draft.json`);
+        const draft = await json(draftPath).catch(() => null);
+        if (draft) sources.push({ date: issue.date, group: page.id, draft });
+      }
     }
+    issues = buildCandidate(rawIssues, sources, await json(path.resolve(values.attachments))).snapshot.issues;
   }
-  return buildCandidate(issues, sources, await json(attachmentsFile));
 }
 
-if (mode === 'candidate') {
-  await saveJson(destination, await loadCandidate());
-  console.log(`Pending candidate: ${destination}`);
-} else if (mode === 'review') {
-  assert.ok(values.candidate, 'Use --candidate FILE');
-  const pending = await json(values.candidate);
-  await saveJson(destination, approveCandidate(pending, values.reviewer || 'editor'));
-  console.log(`Review recorded: ${destination}`);
+if (destination.endsWith('.json')) {
+  await saveJson(destination, { version: 1, status: 'pending', snapshot: { issues } });
 } else {
-  const pending = await loadCandidate();
-  const receipt = values.review ? await json(values.review).catch(() => null) : approveCandidate(pending, values.reviewer || 'editor');
-  const issues = validateReview(pending, receipt);
-  if (destination.endsWith('.json')) {
-    await saveJson(destination, issues);
-  } else {
-    await saveJson(path.join(destination, 'issues.json'), issues);
-    if (receipt) await saveJson(path.join(destination, 'receipt.json'), receipt);
-  }
-  if (directory && values.attachments) {
-    await saveJson(path.join(directory, 'issues.json'), issues);
-  }
-  console.log(`Finalized group batch: ${destination}`);
+  await saveJson(path.join(destination, 'issues.json'), issues);
 }
+if (directory && values.attachments) {
+  await saveJson(path.join(directory, 'issues.json'), issues);
+}
+console.log(`Finalized group batch: ${destination}`);

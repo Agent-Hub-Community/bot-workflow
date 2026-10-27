@@ -165,26 +165,18 @@ try {
   await save(path.join(batch, 'issues.json'), issues);
   const manifest = path.join(runDirectory, 'attachments.json');
   await save(manifest, attachments);
-  const candidate = path.join(runDirectory, 'candidate.json'), receipt = path.join(runDirectory, 'review.json');
   const final = path.join(runDirectory, 'final');
-  const common = ['--directory', batch, '--attachments', manifest];
-  await bot('finalize-batch.mjs', ['candidate', ...common, '--out', candidate]);
-  // Demonstrates explicit approval with a declared fixture reviewer. This is not a real editorial review.
-  await bot('finalize-batch.mjs', ['review', '--candidate', candidate, '--reviewer', 'Synthetic fixture reviewer (not human approval)', '--approve', '--out', receipt]);
-  await bot('finalize-batch.mjs', ['finalize', ...common, '--review', receipt, '--out', final]);
+  await bot('finalize-batch.mjs', ['--directory', batch, '--attachments', manifest, '--out', final]);
 
   const selectionFile = path.join(runDirectory, 'external-selection.json');
   const external = path.join(runDirectory, 'external-draft.json');
   const enriched = path.join(runDirectory, 'external-with-comments.json');
-  const externalReceipt = path.join(runDirectory, 'external-review.json');
   await save(selectionFile, selection);
   stage = 'external';
   await bot('generate-external.mjs', [selectionFile, external]);
   stage = 'external-comments';
   await bot('generate-external-comments.mjs', [external, enriched]);
-  await run(path.join(newspaper, 'scripts/review-external.mjs'), [enriched, selectionFile, externalReceipt,
-    'Synthetic fixture reviewer (not human approval)', '--approve']);
-  validateExternalReview(await json(enriched), selection, await json(externalReceipt));
+  validateExternalReview(await json(enriched), selection);
   const snapshot = activity(groups);
   validatePublicActivity(snapshot, await json(path.join(final, 'issues.json')));
   await save(path.join(final, 'activity/snapshot.json'), snapshot);

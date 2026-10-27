@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { load, root as newspaperRoot } from '../lib/newspaper-root.mjs';
 import { chatGroups } from './chat-groups.mjs';
 
-const { dayOf, startOf, memberKey, deduplicate, summarize } = await load('lib/activity.mjs');
+const { dayOf, startOf, deduplicate, summarize } = await load('lib/activity.mjs');
 const { validatePublicActivity } = await load('lib/public-activity.mjs');
 const { digests } = await load('lib/digest.mjs');
 
@@ -25,9 +25,10 @@ const date = issues[0].date, end = startOf(date) + 86400;
 const cache = JSON.parse(await readFile(path.join(home, '.wx-cli/cache/_mtimes.json'), 'utf8'));
 const approved = JSON.parse(await readFile(new URL('data/public-activity/snapshot.json', root), 'utf8'));
 // Every group that existed by this date feeds the community ranking, including ones that do not
-// have a reader section yet; per-group columns and daily ranks stay with the sectioned groups.
-// Groups the edition itself carries are always ranked, even if they predate their recorded start.
-const sectionedIds = new Set(issues[0].pages.map(page => page.id));
+// have a reader section yet; per-group columns and daily ranks stay with the main daily groups.
+// Main groups the edition itself carries are always ranked, even if they predate their recorded start.
+const optionalIds = new Set(allGroups.filter(group => group.optionalPage).map(group => group.id));
+const sectionedIds = new Set(issues[0].pages.map(page => page.id).filter(id => !optionalIds.has(id)));
 const knownGroups = allGroups.filter(group => sectionedIds.has(group.id) || !group.from || group.from <= date);
 const groups = knownGroups.filter(group => sectionedIds.has(group.id));
 assert.ok(groups.length, 'Release has no group pages');
@@ -81,7 +82,6 @@ const keys = new Set([...Object.keys(approved.avatars), ...Object.values(approve
 let serial = Math.max(0, ...[...keys].map(key => Number(key.slice(7))));
 const mapping = new Map(), pending = [], failures = [];
 const contact = new DatabaseSync(cache['contact/contact.db'].path, { readOnly: true });
-const identities = new Map(rows.filter(r => r.sender).map(r => [memberKey(r.sender), r.sender]));
 try {
 for (const stat of [
   ...Object.values(stats.ranks),
@@ -92,7 +92,7 @@ for (const stat of [
       if (mapping.has(member.key)) continue;
       const key = `member-${String(++serial).padStart(3, '0')}`;
       mapping.set(member.key, key);
-      const person = contact.prepare('SELECT small_head_url, big_head_url FROM contact WHERE username = ?').get(identities.get(member.key));
+      const person = contact.prepare('SELECT small_head_url, big_head_url FROM contact WHERE username = ?').get(member.key);
       const raw = person?.small_head_url || person?.big_head_url;
       if (!raw) { failures.push({ key, reason: 'missing-contact-image' }); continue; }
       try {

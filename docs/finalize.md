@@ -2,7 +2,7 @@
 
 模型写完初稿、主编改完错并挑好资料和讨论节选后，用 `scripts/finalize-batch.mjs` 校验并组装给网页构建用的 `issues.json`。
 
-## 推荐的一步用法
+## 用法
 
 把审改后的标题、正文、版头、`emphasis`、`aiComment`、`resources` 和 `discussion` 直接更新到 `$BATCH/issues.json`，或者把附件整理成 `$BATCH/attachments.json`，然后跑一步命令：
 
@@ -14,9 +14,9 @@ node "$BOT/scripts/finalize-batch.mjs" "$BATCH"
 node "$BOT/scripts/finalize-batch.mjs" --directory "$BATCH" --attachments "$BATCH/attachments.json"
 ```
 
-脚本会直接检查：
+脚本会检查：
 
-- 当天所有有读者版面的群都在 `issues.json` 里（群列表来自 `newspaper/lib/groups.mjs`），当天没内容的群留空 `stories: []`。
+- 当天固定出读者版面的主群（`pageGroups(D)`）都在 `issues.json` 里，当天没内容的主群留空 `stories: []`；有实质讨论内容的垂类专项群（`optionalPageGroups(D)`）按需纳入，无内容时省略。
 - 每条故事都有合法的 `emphasis` 下划线片段（逐字唯一匹配、不跨自然段、不重叠、总长不超过正文 30%）和 `aiComment`。
 - `resources` 只含支持的五种类型（`paper`、`article`、`code`、`demo`、`discussion`），且 URL 是无账号密码、无追踪参数的 `https://` 地址。
 - `discussion` 符合匿名讨论格式（`speaker` 从 1 开始、`time` 为 `HH:mm`、不含模型读图文本）。
@@ -24,7 +24,7 @@ node "$BOT/scripts/finalize-batch.mjs" --directory "$BATCH" --attachments "$BATC
 
 ## 使用 `attachments.json` 挂载附件（可选）
 
-如果习惯把资料链接、原始讨论、重点和 AI 锐评单独放在 `attachments.json` 里，脚本支持按 `feedbackId`、`title` 或 `topic_key` 自动匹配对应条目，改过正文后无需手动重算 32 位 `feedbackId`，也不需要填写 `resourceEvidence` 或被删条目的 `exclude` 记录：
+如果把资料链接、原始讨论、重点和 AI 锐评单独放在 `attachments.json` 里，脚本会按 `title`、`topic_key` 或 `feedbackId` 自动匹配对应条目：
 
 ```json
 {
@@ -50,5 +50,3 @@ node "$BOT/scripts/finalize-batch.mjs" --directory "$BATCH" --attachments "$BATC
   ]
 }
 ```
-
-兼容旧版的 `candidate` / `review` / `finalize` 三步子命令仍然保留，但日常跑报直接用上面的一步命令即可。

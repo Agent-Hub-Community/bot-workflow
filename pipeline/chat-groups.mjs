@@ -1,6 +1,5 @@
-// Joins the public group list (newspaper lib/groups.mjs: id, label, from, page, pageFrom) with the private values in
-// groups.private.mjs: each group's WeChat chatroom username and the library operator hashes. groups.private.mjs is
-// not committed; groups.example.mjs shows its shape.
+// Joins the public group list (newspaper lib/groups.mjs) with the private chatroom usernames in
+// groups.private.mjs. groups.private.mjs is not committed; groups.example.mjs shows its shape.
 import { existsSync } from 'node:fs';
 import { load } from '../lib/newspaper-root.mjs';
 
@@ -27,7 +26,7 @@ export async function privateConfig() {
     for (const [id, username] of Object.entries(config.chatrooms || {})) {
       if (!/^\d+@chatroom$/.test(username)) throw new Error(`groups.private.mjs: ${id} still has a placeholder chatroom username`);
     }
-    return { chatrooms: config.chatrooms || {}, libraryOperators: config.libraryOperators || [] };
+    return { chatrooms: config.chatrooms || {} };
   })();
   return loaded;
 }

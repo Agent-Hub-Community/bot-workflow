@@ -1,5 +1,4 @@
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { load, rootDir } from '../lib/newspaper-root.mjs';
@@ -27,7 +26,7 @@ const selected = process.env.DAILY_GROUP
 if (!selected.length) throw new Error('Unknown DAILY_GROUP');
 for (const group of selected) {
   let raw = [], exhausted = false;
-  const pageHashes = new Set();
+  let lastFirstId = null;
   for (let offset = 0; offset < 10000; offset += 500) {
     const stdout = execFileSync(process.env.WX_BIN || 'wx', [
       'history', group.username, '--since', date, '--until', nextDate,
@@ -35,9 +34,10 @@ for (const group of selected) {
     ], { env: { ...process.env, HOME: process.env.WX_ACTIVITY_HOME }, timeout: 60000, maxBuffer: 20 * 1024 * 1024 });
     const batch = JSON.parse(stdout.toString());
     if (!Array.isArray(batch)) throw new Error(`Unexpected history response for ${group.id}`);
-    const hash = createHash('sha256').update(JSON.stringify(batch)).digest('hex');
-    if (batch.length && pageHashes.has(hash)) throw new Error(`Repeated page for ${group.id}`);
-    pageHashes.add(hash);
+    if (batch.length && batch[0]?.local_id !== undefined && batch[0].local_id === lastFirstId) {
+      throw new Error(`Repeated page for ${group.id}`);
+    }
+    lastFirstId = batch[0]?.local_id ?? null;
     raw.push(...batch);
     if (batch.length < 500) { exhausted = true; break; }
   }

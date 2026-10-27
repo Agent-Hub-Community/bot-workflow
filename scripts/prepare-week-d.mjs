@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { load } from '../lib/newspaper-root.mjs';
 const { readerPage, validateDraft } = await load('lib/daily-generation.mjs');
 const { applyComments } = await load('lib/story-comments.mjs');
-const { isGroupId, pageGroups } = await load('lib/groups.mjs');
+const { isGroupId, pageGroups, optionalPageGroups } = await load('lib/groups.mjs');
 
 // Drafts and packages a batch whose DIRECTORY/<date>/group-N.input.json files were written by the chat collector
 // (pipeline/collect-batch.mjs FROM THROUGH DIRECTORY). Prompts and generator scripts come from this repository.
@@ -88,12 +88,14 @@ if (mode === 'generate') {
   const issues = [], manifest = [];
   for (const date of dates) {
     const pages = [];
-    // Groups without a reader section are still collected and drafted, but stay out of the edition.
-    const sectioned = new Set(pageGroups(date).map(group => group.id));
-    for (const id of (await collectedGroups(date)).filter(id => sectioned.has(id))) {
+    // Main groups always appear in the edition; optional topical groups appear only when they have stories.
+    const required = new Set(pageGroups(date).map(group => group.id));
+    const optional = new Set((optionalPageGroups ? optionalPageGroups(date) : []).map(group => group.id));
+    for (const id of (await collectedGroups(date)).filter(id => required.has(id) || optional.has(id))) {
       const input = JSON.parse(await readFile(path.join(out, date, `${id}.input.json`), 'utf8'));
       const draft = JSON.parse(await readFile(path.join(out, date, `${id}.draft.json`), 'utf8'));
       const page = readerPage(draft, input);
+      if (optional.has(id) && !page.stories.length) continue;
       const runInfo = input.coverage.count
         ? JSON.parse(await readFile(path.join(out, date, `${id}.draft.json.run.json`), 'utf8')) : null;
       const time = new Date(input.cutoff).toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }).slice(0, 5);

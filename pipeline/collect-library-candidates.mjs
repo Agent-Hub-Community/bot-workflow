@@ -12,9 +12,8 @@ import path from 'node:path';
 import { extractLinks } from '../scripts/package-month-resources.mjs';
 import { load, rootDir as root } from '../lib/newspaper-root.mjs';
 import { loadChatDays } from './chat-days.mjs';
-import { chatGroups, privateConfig } from './chat-groups.mjs';
+import { chatGroups } from './chat-groups.mjs';
 
-const { memberKey } = await load('lib/activity.mjs');
 const { GROUPS, canonicalUrl, resourceKey, readLibrary } = await load('lib/library.mjs');
 
 const option = name => { const index = process.argv.indexOf(name); return index >= 0 ? process.argv[index + 1] : null; };
@@ -59,8 +58,8 @@ const library = await readLibrary(path.join(root, 'data')).catch(error => { if (
 const curated = new Set(library.items.flatMap(item => [...item.links.map(link => link.url), ...(item.aliases || [])].map(resourceKey)));
 
 const chatrooms = Object.fromEntries((await chatGroups()).map(group => [group.id, group.username]));
-const { libraryOperators } = await privateConfig();
 const members = {};
+const senderIds = new Map();
 let resolveSender = () => null, closeCache = () => {};
 if (process.env.WX_ACTIVITY_HOME) {
   const { DatabaseSync } = await import('node:sqlite');
@@ -94,7 +93,9 @@ if (process.env.WX_ACTIVITY_HOME) {
       }
     }
     if (senders.size !== 1) return null;
-    const [username] = senders, key = memberKey(username);
+    const [username] = senders;
+    if (!senderIds.has(username)) senderIds.set(username, `sharer-${String(senderIds.size + 1).padStart(3, '0')}`);
+    const key = senderIds.get(username);
     if (!members[key]) {
       const person = contact.prepare('SELECT small_head_url, big_head_url FROM contact WHERE username = ?').get(username);
       members[key] = { avatarUrl: person?.small_head_url || person?.big_head_url || null };
@@ -147,7 +148,7 @@ for (const [key, stories] of published) {
 closeCache();
 const list = [...candidates.values()].sort((a, b) => a.key.localeCompare(b.key));
 await mkdir(path.dirname(out), { recursive: true, mode: 0o700 });
-await writeFile(out, `${JSON.stringify({ since, generatedFrom: { dailyInputs, firstDaily, through: days.map(day => day.date).sort().at(-1) }, operators: libraryOperators, candidates: list, members }, null, 2)}\n`, { mode: 0o600 });
+await writeFile(out, `${JSON.stringify({ since, generatedFrom: { dailyInputs, firstDaily, through: days.map(day => day.date).sort().at(-1) }, candidates: list, members }, null, 2)}\n`, { mode: 0o600 });
 const count = filter => list.filter(filter).length;
 console.log(JSON.stringify({
   out: path.relative(root, out), days: days.length, candidates: list.length, truncatedSkipped: truncated,

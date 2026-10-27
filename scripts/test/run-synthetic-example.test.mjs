@@ -55,7 +55,7 @@ test('actual offline CLI chain covers full review, cross-day identity, external 
   const result = await json(path.join(first.runDirectory, 'result.json'));
   for (const expected of ['prepare-week-d.mjs', 'enrich-month-d.mjs', 'weekly-discussion-evidence.mjs',
     'weekly-attach-discussions.mjs', 'weekly-select-discussion.mjs', 'finalize-batch.mjs',
-    'generate-external.mjs', 'review-external.mjs', 'prepare-preview.mjs']) {
+    'generate-external.mjs', 'prepare-preview.mjs']) {
     assert.ok(result.commands.some(command => command.script === expected), expected);
   }
   assert.ok(result.requests.every(request => request.model === 'synthetic-fixed-response'));
@@ -67,10 +67,6 @@ test('actual offline CLI chain covers full review, cross-day identity, external 
   assert.ok(issues[1].pages[0].stories[0].discussion.length);
   assert.equal(issues[1].pages[0].stories[0].discussion.at(-1).quote.speaker, null,
     'A daily excerpt must not claim a previous-day quote speaker is visible');
-  const receipt = await json(path.join(final, 'receipt.json'));
-  assert.equal(receipt.status, 'approved');
-  assert.match(receipt.reviewer, /not human approval/);
-  assert.deepEqual(receipt.snapshot.issues, issues);
   const weekly = await json(path.join(first.runDirectory, 'weekly.json'));
   const discussion = weekly.pages[0].stories[0].discussion;
   assert.equal(new Set(discussion.map(entry => entry.speaker)).size, 4);
@@ -97,6 +93,5 @@ test('actual offline CLI chain covers full review, cross-day identity, external 
   assert.match(card.textContent, /合成项目占位地址/);
   const second = JSON.parse((await run()).stdout);
   assert.notEqual(second.runDirectory, first.runDirectory);
-  assert.deepEqual(await json(path.join(final, 'receipt.json')), receipt, 'A repeat run must preserve old evidence');
   assert.equal((await exec('git', ['-C', newspaper, 'status', '--porcelain', '--', 'data'])).stdout, production.stdout);
 });

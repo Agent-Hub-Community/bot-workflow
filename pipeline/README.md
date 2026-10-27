@@ -34,12 +34,7 @@
 
 ## `groups.private.mjs` 怎么填
 
-这个文件被 `.gitignore` 排除，只放两个导出值：
-
-| 导出名 | 填什么 | 怎么拿 |
-|---|---|---|
-| `chatrooms` | 群 id（`group-1` 到 `group-5`，跟 `newspaper/lib/groups.mjs` 对齐）到微信群号 `<数字>@chatroom` 的映射 | 跑 `HOME="$WX_HOME" wx sessions --json` 查看 |
-| `libraryOperators` | 负责往各群发日报、转外链的运营账号哈希数组 | 对运营号微信 `username` 算 SHA-256 取前 12 位十六进制（`newspaper/lib/activity.mjs` 的 `memberKey`）；没有就填 `[]` |
+这个文件被 `.gitignore` 排除，只导出 `chatrooms`：群 id（`group-1` 到 `group-8`，跟 `newspaper/lib/groups.mjs` 对齐）到微信群号 `<数字>@chatroom` 的映射（跑 `HOME="$WX_HOME" wx sessions --json` 查看）。
 
 `chat-groups.mjs` 会把 `newspaper/lib/groups.mjs` 里的公开配置（id、名称、何时开始采集、何时出读者版面）和这里的 `chatrooms` 拼在一起。缺文件、留着占位符没改、或者网站新加了群这里没配，脚本都会报错拦住。
 

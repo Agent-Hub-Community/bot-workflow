@@ -5,7 +5,7 @@
 ## 1. 环境与模型配置
 
 - 两个仓库放在同一个父目录下；如果不在一起，设好 `NEWSPAPER_DIR`。Node.js 最低 22.15，推荐 24。
-- 群列表以 `$NEWSPAPER/lib/groups.mjs` 为唯一来源：`collectedGroups(D)` 是当天要采集并计入社区榜的群，`pageGroups(D)` 是当天要出读者版面的群。对应的微信群号 `<数字>@chatroom` 和运营号哈希配在 `$PIPELINE/groups.private.mjs` 里。
+- 群列表以 `$NEWSPAPER/lib/groups.mjs` 为唯一来源：`collectedGroups(D)` 是当天要采集并计入社区榜的群，`pageGroups(D)` 是当天固定出读者版面的主群，`optionalPageGroups(D)` 是有实质内容时才纳入日报和本日总览的垂类专项群（无内容时自动省略，不生成空版）。对应的微信群号 `<数字>@chatroom` 配在 `$PIPELINE/groups.private.mjs` 里。
 - 生成脚本都从 `$BOT/lib/llm.mjs` 读配置：接口地址 `DAILY_LLM_BASE_URL`（脚本在末尾拼 `/chat/completions`），模型名 `DAILY_LLM_MODEL`（默认 `gemini-4-argon`），密钥 `DAILY_LLM_API_KEY`。需要单次调模型（比如周报分片或单条重写）时用 `node "$BOT/scripts/call-llm.mjs" PROMPT OUTPUT [--system FILE] [--reasoning high] [--max-tokens N]`。
 - 写群稿开 `reasoning_effort: high`（大群跑一次约 4 到 5 分钟，多个群并行跑整批也是 5 分钟左右），输出上限 32768 token；外部资讯和周报不开推理。
 
@@ -28,7 +28,7 @@ WX_ACTIVITY_HOME="$WX_HOME" node "$PIPELINE/prepare-release-activity.mjs" "$BATC
 node "$BOT/scripts/finalize-batch.mjs" "$BATCH"
 ```
 
-（若使用独立的 `attachments.json`，传 `node "$BOT/scripts/finalize-batch.mjs" --directory "$BATCH" --attachments "$BATCH/attachments.json"`，它会校验并原地更新 `$BATCH/issues.json` 与 `$BATCH/final/issues.json`，不需要再分步跑 `candidate` 和 `review` 回执。）
+（若使用独立的 `attachments.json`，传 `node "$BOT/scripts/finalize-batch.mjs" --directory "$BATCH" --attachments "$BATCH/attachments.json"`，它会校验并原地更新 `$BATCH/issues.json` 与 `$BATCH/final/issues.json`。）
 
 - 检查 `$BATCH/activity/snapshot.json` 和 `avatar-review.json`。把每张新上榜成员的头像打开看一眼，确认正常、没有“暂时无法查看”占位图或不当图片后，清空 `avatar-review.json` 里的 `pending` 数组。
 
@@ -61,7 +61,7 @@ node "$BOT/scripts/generate-bot.mjs" "$BATCH/final-reader-issue.json" "$D" "$BAT
 
 ## 5. 正式入库与部署（获准发布后）
 
-拿到用户对本期发布的同意后，直接入库、构建并登记反馈与向量（不需要重签任何审批回执）：
+拿到用户对本期发布的同意后，直接入库、构建并登记反馈与向量：
 
 ```sh
 node scripts/publish-reviewed-batch.mjs "$BATCH"

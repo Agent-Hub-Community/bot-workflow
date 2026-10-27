@@ -5,7 +5,6 @@
 // Usage: weekly-select-discussion.mjs READER_JSON OUT_DIR [--max N] [--audit AUDIT_JSON]
 import { readFile, writeFile, mkdir, chmod } from 'node:fs/promises';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
 import { llmModel, llmUrl, llmHeaders } from '../lib/llm.mjs';
 import { selectDiscussion, validateDiscussionAudit } from '../lib/weekly-discussion.mjs';
 
@@ -57,9 +56,7 @@ function parseSelection(result, count) {
 }
 
 async function ask(prompt, file, count) {
-  const promptSha = createHash('sha256').update(instruction + '\n' + prompt).digest('hex');
-  const cached = `${file}.${promptSha}.response.json`;
-  try { return parseSelection(JSON.parse(await readFile(cached, 'utf8')), count); } catch {}
+  const cached = `${file}.response.json`;
   let lastError;
   for (let attempt = 0; attempt < 2; attempt++) {
     let result;

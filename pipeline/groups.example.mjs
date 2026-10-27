@@ -1,4 +1,4 @@
-// Template for groups.private.mjs, which holds the pipeline's private values and is never committed:
+// Template for groups.private.mjs, which holds the pipeline's private chatroom IDs and is never committed:
 //   cp groups.example.mjs groups.private.mjs
 // then replace every placeholder. chat-groups.mjs refuses placeholders when it loads groups.private.mjs.
 
@@ -14,8 +14,3 @@ export const chatrooms = {
   'group-7': 'GROUP-7-CHATROOM-ID@chatroom',
   'group-8': 'GROUP-8-CHATROOM-ID@chatroom',
 };
-
-// Member hashes (memberKey in the newspaper's lib/activity.mjs) of accounts that post the daily updates and relay outside links
-// into every group. collect-library-candidates.mjs writes them into candidates.json, and the public
-// assemble-library.mjs then counts their posts as relays, not member shares. Leave empty if there is none.
-export const libraryOperators = [];

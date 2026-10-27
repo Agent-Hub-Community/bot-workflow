@@ -44,8 +44,8 @@
 | 日报生成与打包 | `prepare-week-d.mjs generate` / `package` | 两天五群输入（五群为空，一到四群各一条话题）能正常打包 |
 | 锐评、报头与重点 | `enrich-month-d.mjs` | 版头、AI 锐评与重点片段合并无误 |
 | 周报跨日身份与讨论节选 | `generate-weekly-gemini.mjs`、`weekly-discussion-evidence.mjs`、`weekly-attach-discussions.mjs`、`weekly-select-discussion.mjs` | 同一位虚构群友第一天是 `p1`、第二天变成 `p2` 时不会串人；筛掉中间消息后，剩余发言仍保持原来的“群友 N”编号 |
-| 定稿与回执 | `finalize-batch.mjs`（`candidate` → `review --approve` → `finalize`） | `topic_key` 与 `feedbackId` 精确配对，签发回执并产出 `final/issues.json` |
-| 外部资讯 | `generate-external.mjs`、`generate-external-comments.mjs`、`review-external.mjs` | 外部候选生成、补锐评并写出审核记录 |
+| 定稿校验 | `finalize-batch.mjs` | 将资料与讨论节选合进 `final/issues.json` 并校验 schema 与隐私 |
+| 外部资讯 | `generate-external.mjs`、`generate-external-comments.mjs` | 外部候选生成并补齐 AI 锐评 |
 | 静态预览 | `newspaper/scripts/prepare-preview.mjs` | 调用真构建器生成预览，并核对页面数据与定稿一致 |
 
 脚本在本地 `127.0.0.1` 随机端口起一个微型 HTTP 服务，固定返回 `fixtures.mjs` 里写好的 JSON（模型名标为 `synthetic-fixed-response`），跑完即关；子进程也不继承宿主环境里的真实模型密钥、微信路径或代理设置。
