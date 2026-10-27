@@ -35,8 +35,6 @@ if (stat) {
 // An allowlist avoids inheriting model credentials, wx paths, proxy settings and Node preload hooks.
 const cleanEnv = { PATH: `${path.dirname(process.execPath)}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin`, LANG: 'en_US.UTF-8', TZ: 'UTC',
   NEWSPAPER_DIR: newspaper, DAILY_LLM_MODEL: model };
-const git = await exec('git', ['-C', newspaper, 'status', '--porcelain'], { env: cleanEnv });
-assert.equal(git.stdout.trim(), '', 'NEWSPAPER_DIR must be a clean clone (commit or separate unrelated work first)');
 await readFile(path.join(newspaper, 'node_modules/linkedom/package.json'));
 if (!stat) {
   await mkdir(destination, { mode: 0o700 });

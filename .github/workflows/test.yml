@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: Agent-Hub-Community/newspaper
-          ref: ee11cddaec8dcddb13a94a7b2d26bdceae165be5
+          ref: main
           path: newspaper
       - uses: actions/setup-node@v4
         with:
