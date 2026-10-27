@@ -22,16 +22,17 @@ const data = JSON.parse(await readFile(dataFile, 'utf8'));
 const issue = Array.isArray(data.digests) ? data.digests.find(digest => digest.date === date) : data.date === date ? data : null;
 if (!issue?.pages?.length) throw new Error(`No issue for ${date} in ${dataFile}`);
 const firstLine = `AgentHub ${date.replaceAll('-', '.')} 日报${preview ? '导览（链接待上线核验）' : '已上线'}`;
+const overviewUrl = `${site}/daily/${date}/overview/`;
 // The message is an overview, so the model sees each page's heading, theme and story titles, not the
 // story text; with full text it retold the stories in detail (2026-10-16).
 // Pages without stories are left out of the message rather than announced as empty (2026-10-19).
 const sections = issue.pages.filter(page => page.stories?.length).map(page => ({
-  label: page.label, url: `${site}/daily/${date}/${page.id}/`,
+  label: page.label,
   heading: page.heading, theme: page.theme, titles: page.stories.map(story => story.title),
 }));
 if (!sections.length) throw new Error(`No page with stories for ${date}`);
 const notes = notesFile ? await readFile(notesFile, 'utf8') : '';
-const system = `${await readFile(new URL('../prompts/daily-bot.md', import.meta.url), 'utf8')}${notes ? `\n本期注意：\n${notes}` : ''}`;
+const system = `${await readFile(new URL('../prompts/daily-bot.md', import.meta.url), import.meta.url ? 'utf8' : 'utf8')}${notes ? `\n本期注意：\n${notes}` : ''}`;
 
 await rm(output, { force: true });
 await rm(`${output}.response.json`, { force: true });
@@ -41,7 +42,7 @@ const response = await fetch(llmUrl, {
   headers: llmHeaders(),
   body: JSON.stringify({ model: llmModel, max_tokens: 12000, stream: false, messages: [
     { role: 'system', content: system },
-    { role: 'user', content: JSON.stringify({ firstLine, sections }) },
+    { role: 'user', content: JSON.stringify({ firstLine, overviewUrl, sections }) },
   ] }),
   signal: AbortSignal.timeout(300000),
 });
@@ -53,13 +54,11 @@ if (result.model !== llmModel || choice?.finish_reason !== 'stop' || !choice.mes
   throw new Error('Unexpected model or incomplete response');
 }
 const text = choice.message.content.trim();
-const links = (text.match(/https?:\/\/[^\s]+/g) || []).sort();
-// Only pages with stories are linked; the leaderboard is no longer part of the message (2026-10-15).
-const expected = sections.map(section => section.url).sort();
+const links = (text.match(/https?:\/\/[^\s]+/g) || []);
 const problems = [
   ...(text.startsWith(firstLine) ? [] : ['first line']),
   ...(/\*\*|```|^#/m.test(text) ? ['Markdown markup'] : []),
-  ...(JSON.stringify(links) === JSON.stringify(expected) ? [] : [`links ${JSON.stringify(links)}`]),
+  ...(JSON.stringify(links) === JSON.stringify([overviewUrl]) ? [] : [`links ${JSON.stringify(links)}`]),
   ...(/当天未选编|暂无稿件|无.{0,2}版面/.test(text) ? ['mentions an empty page'] : []),
 ];
 if (problems.length) throw new Error(`Invalid bot message: ${problems.join('; ')}`);

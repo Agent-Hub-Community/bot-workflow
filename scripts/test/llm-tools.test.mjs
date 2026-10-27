@@ -38,17 +38,18 @@ async function setup(t, reply) {
   return { dir, requests, run };
 }
 
-test('bot message covers only pages with stories, links each once and rejects empty-page notes', async t => {
+test('bot message covers only pages with stories, links overview once and rejects empty-page notes', async t => {
   const issue = { date: '2026-10-13', pages: [
     { id: 'group-1', label: '一群', stories: [] },
     { id: 'group-2', label: '二群', stories: [{ title: 'Review cycles', text: 'Models change faster than reviews.' }] },
   ] };
   let dropLink = false, noteEmpty = false;
   const f = await setup(t, request => {
-    const { firstLine, sections, rank } = JSON.parse(request.messages[1].content);
+    const { firstLine, overviewUrl, sections, rank } = JSON.parse(request.messages[1].content);
     assert.equal(rank, undefined, 'the leaderboard is not offered to the model');
-    const lines = [firstLine, ...(noteEmpty ? ['【一群】当天未选编独立话题'] : []),
-      `【二群】${sections[0].titles[0]}`, ...(dropLink ? [] : [sections[0].url])];
+    const lines = [firstLine, ...(dropLink ? [] : [overviewUrl]), '',
+      ...(noteEmpty ? ['【一群】当天未选编独立话题'] : []),
+      `【二群】${sections[0].titles[0]}`];
     return { content: lines.join('\n') };
   });
   const data = path.join(f.dir, 'data.json'), output = path.join(f.dir, 'bot.md');
@@ -56,15 +57,16 @@ test('bot message covers only pages with stories, links each once and rejects em
   await f.run('generate-bot.mjs', [data, '2026-10-13', output, '--site', site]);
   const input = JSON.parse(f.requests[0].messages[1].content);
   assert.equal(input.firstLine, 'AgentHub 2026.10.13 日报已上线');
-  assert.deepEqual(input.sections.map(section => section.url), [`${site}/daily/2026-10-13/group-2/`], 'the empty page is not offered');
-  assert.match(await readFile(output, 'utf8'), /daily\/2026-10-13\/group-2\//);
+  assert.equal(input.overviewUrl, `${site}/daily/2026-10-13/overview/`);
+  assert.deepEqual(input.sections.map(section => section.label), ['二群'], 'the empty page is not offered');
+  assert.match(await readFile(output, 'utf8'), /daily\/2026-10-13\/overview\//);
 
   await writeFile(data, JSON.stringify(issue));
   await f.run('generate-bot.mjs', [data, '2026-10-13', output, '--site', site, '--preview']);
   assert.match(JSON.parse(f.requests[1].messages[1].content).firstLine, /链接待上线核验/);
   await f.run('generate-bot.mjs', [data, '2026-10-13', output]);
-  assert.deepEqual(JSON.parse(f.requests[2].messages[1].content).sections.map(section => section.url),
-    [`${publicSite}daily/2026-10-13/group-2/`], 'links default to the site in site.mjs');
+  assert.equal(JSON.parse(f.requests[2].messages[1].content).overviewUrl,
+    `${publicSite}daily/2026-10-13/overview/`, 'overview link defaults to the site in site.mjs');
 
   noteEmpty = true;
   await assert.rejects(f.run('generate-bot.mjs', [data, '2026-10-13', output, '--site', site]), /mentions an empty page/);
