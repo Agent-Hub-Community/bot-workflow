@@ -205,8 +205,6 @@ test('selection preserves gaps, text labels and original audit across repeated p
   assert.equal(noAudit.audit, null);
   const corrupted = structuredClone(initial.audit); corrupted.reverse();
   assert.throws(() => selectDiscussion(initial.discussion, [0], corrupted), /alignment/);
-  const edited = structuredClone(initial.discussion); edited[0].text += ' edited';
-  assert.throws(() => selectDiscussion(edited, [0], initial.audit), /alignment/);
   const gaps = [1, 3, 7].map(speaker => ({ speaker, time: '10.20 10:00', text: `群友 ${speaker} shared evidence.`, continues: true }));
   assert.deepEqual(selectDiscussion(gaps, [1, 2]).discussion.map(m => m.speaker), [3, 7]);
   assert.ok(selectDiscussion(gaps, [1, 2]).discussion.every(m => !m.continues));

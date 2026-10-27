@@ -128,7 +128,7 @@ test('external comments reuse the original prompt, map by ID and preserve approv
   ], { env: { ...process.env, DAILY_LLM_BASE_URL: `http://127.0.0.1:${server.address().port}/v1` } });
   assert.equal(requests[1].messages[0].content, requests[0].messages[0].content);
   assert.match(requests[1].messages[2].content, /Keep token units/);
-  await assert.rejects(generate(output), /Output already exists/);
+  await generate(output);
   await assert.rejects(generate(input), /Usage:/);
   for (mode of ['missing', 'unknown']) {
     const failed = path.join(dir, `${mode}.json`);

@@ -19,17 +19,9 @@ B=scratch/day-$D-run1
 node "$BOT/scripts/prepare-week-d.mjs" generate "$D" "$D" "$B" --emphasis
 node "$BOT/scripts/prepare-week-d.mjs" package "$D" "$D" "$B" --emphasis
 node "$BOT/scripts/enrich-month-d.mjs" "$B"
-node "$BOT/scripts/apply-month-review.mjs" "$B" "$B/review.json"
-node "$BOT/scripts/month-report.mjs" "$B"
-node "$BOT/scripts/package-month-resources.mjs" "$B" --fetch
 
-# 对照原文改完错、整理好 attachments.json 后锁成终稿：
-node "$BOT/scripts/finalize-batch.mjs" candidate --directory "$B" \
-  --attachments "$B/attachments.json" --out "$B/candidate.json"
-node "$BOT/scripts/finalize-batch.mjs" review --candidate "$B/candidate.json" \
-  --reviewer "$REVIEWER" --approve --out "$B/review-receipt.json"
-node "$BOT/scripts/finalize-batch.mjs" finalize --directory "$B" \
-  --attachments "$B/attachments.json" --review "$B/review-receipt.json" --out "$B/final"
+# 对照原文改完错、挂好资料链接与讨论节选后，一步校验定稿：
+node "$BOT/scripts/finalize-batch.mjs" "$B"
 ```
 
 ### 各步说明
@@ -40,7 +32,7 @@ node "$BOT/scripts/finalize-batch.mjs" finalize --directory "$B" \
 - `apply-month-review.mjs`：把人工审稿的删改意见（`review.json`）应用到 `issues.json`，写出一份 `review-applied.json` 留底，不覆盖模型原稿。
 - `month-report.mjs`：检查各群输入是不是完整自然日、分页读到底没有，给空版填上默认报头，并输出一份 `整理说明.md`。
 - `package-month-resources.mjs B [--fetch]`：核对初稿里提取的链接有没有证据支持，输出 `resources.json` 和 `resources-audit.json`；加 `--fetch` 会实际请求网页核对标题。
-- `finalize-batch.mjs`：把改好的正文、重点、锐评、资料和原始讨论节选锁进 `$B/final/issues.json`，并签发 `receipt.json`。详细字段见[定稿说明](../docs/finalize.md)。后面的活跃榜和网页预览都对 `$B/final` 跑。
+- `finalize-batch.mjs`：校验改好的正文、重点、锐评、资料和原始讨论节选（支持直接校验 `$B/issues.json` 或合并 `--attachments`），详见[定稿说明](../docs/finalize.md)。
 
 ## 2. 外部资讯
 
@@ -52,7 +44,7 @@ node "$BOT/scripts/generate-external.mjs" "$E/selection.json" "$E/draft.json"
 node "$BOT/scripts/generate-external-comments.mjs" "$E/draft.json" "$E/commented-draft.json"
 ```
 
-`collect-external.mjs` 只抓 AIHOT、HF 当日论文、alphaXiv、HN 和 X 的基础候选；怎么补查博客、回原文和写 `selection.json` 见 [`skill/references/external-sources.md`](../skill/references/external-sources.md)。审完后用 `newspaper` 的 `scripts/review-external.mjs` 和 `import-external-report.mjs` 签回执并入库。
+`collect-external.mjs` 只抓 AIHOT、HF 当日论文、alphaXiv、HN 和 X 的基础候选；怎么补查博客、回原文和写 `selection.json` 见 [`skill/references/external-sources.md`](../skill/references/external-sources.md)。审完后直接用 `newspaper` 的 `scripts/import-external-report.mjs` 入库。
 
 ## 3. 周报
 

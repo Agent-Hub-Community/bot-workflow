@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
-import { readFile, writeFile, access } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
-import { createHash } from 'node:crypto';
 
 export function parseData(source) {
   const match = source.match(/^window\.AGENT_HUB_DATA = ([\s\S]+);\s*$/);
@@ -60,11 +59,6 @@ export async function verify({ newspaper, site, date, rankThrough = date, out })
     'Site must be a directory URL without credentials, query or hash');
   const output = path.resolve(out);
   const dataOutput = `${output}.data.json`;
-  for (const file of [output, dataOutput]) {
-    let exists = false;
-    try { await access(file); exists = true; } catch (error) { if (error.code !== 'ENOENT') throw error; }
-    assert.ok(!exists, `Preserve previous evidence; choose a new --out: ${file}`);
-  }
   const root = path.resolve(newspaper);
   const require = createRequire(path.join(root, 'package.json'));
   const { parseHTML } = require('linkedom');
@@ -82,9 +76,8 @@ export async function verify({ newspaper, site, date, rankThrough = date, out })
   const source = await get(candidates[0]);
   assert.equal(source === expected, true, 'Live data differs from dist/data.js; check deployment SHA and cache');
   const data = parseData(source);
-  // data.js is an index; each issue's pages ship as issues/<date>.js. Older builds inline the pages.
   const index = data.digests.find(issue => issue.date === date);
-  let issueUrl = null, issueSha256 = null;
+  let issueUrl = null;
   if (index?.version) {
     const relative = `issues/${date}.js`;
     const local = await readFile(path.join(root, 'dist', relative), 'utf8');
@@ -94,18 +87,16 @@ export async function verify({ newspaper, site, date, rankThrough = date, out })
     const head = `(window.AGENT_HUB_ISSUES = window.AGENT_HUB_ISSUES || {})[${JSON.stringify(date)}] = `;
     assert.ok(live.startsWith(head), 'Unexpected issue script format; inspect current build format');
     index.pages = JSON.parse(live.slice(head.length).replace(/;\s*$/, '')).pages;
-    issueSha256 = createHash('sha256').update(live).digest('hex');
   }
   const counts = checkEdition(data, date, { groups: await pageGroupIds(root, date), rankThrough });
   validatePublicActivity(data.activity, data.digests);
   const receipt = {
     verifiedAt: new Date().toISOString(), site: base.href, date, rankThrough,
-    dataUrl: candidates[0].href, sha256: createHash('sha256').update(source).digest('hex'),
-    issueUrl: issueUrl?.href || null, issueSha256,
-    exactDataMatch: true, counts, dataFile: dataOutput, browserVerified: false, botSent: false,
+    dataUrl: candidates[0].href, issueUrl: issueUrl?.href || null,
+    exactDataMatch: true, counts, dataFile: dataOutput,
   };
-  await writeFile(dataOutput, JSON.stringify(data, null, 2), { mode: 0o600, flag: 'wx' });
-  await writeFile(output, JSON.stringify(receipt, null, 2), { mode: 0o600, flag: 'wx' });
+  await writeFile(dataOutput, JSON.stringify(data, null, 2), { mode: 0o600 });
+  await writeFile(output, JSON.stringify(receipt, null, 2), { mode: 0o600 });
   return receipt;
 }
 
@@ -116,7 +107,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
       'rank-through': { type: 'string' }, out: { type: 'string' }, help: { type: 'boolean' },
     } });
     if (values.help) {
-      console.log('node verify-publication.mjs --newspaper PATH --site URL/ --date YYYY-MM-DD --out NEW_FILE [--rank-through YYYY-MM-DD]');
+      console.log('node verify-publication.mjs --newspaper PATH --site URL/ --date YYYY-MM-DD --out FILE [--rank-through YYYY-MM-DD]');
     } else {
       for (const key of ['newspaper', 'site', 'date', 'out']) assert.ok(values[key], `Missing --${key}`);
       console.log(JSON.stringify(await verify({ ...values, rankThrough: values['rank-through'] || values.date }), null, 2));

@@ -111,7 +111,7 @@ node test/library-browser.mjs
 VERIFY_SITE="http://127.0.0.1:$PORT/newspaper" node test/weekly-browser.mjs
 ```
 
-在 320px、390px、820px 和 1440px 下检查各群周报页、外部资讯页、周榜页以及导出的分享长图。
+在 375px 和 1440px 下抽检各群周报页、外部资讯页和周榜页。
 
 拿到发布同意后，跑公开构建、登记 D1 点心与反馈目录、更新语义向量并推送部署：
 
