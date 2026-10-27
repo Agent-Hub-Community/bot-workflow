@@ -18,7 +18,8 @@ for (let i = 0; i < issues.length; i += 5) {
   await writeFile(file, JSON.stringify(batch, null, 2), { mode: 0o600 });
   parts.push(dir);
   if (!process.argv.includes('--assemble')) {
-    for (const type of ['comments', 'headlines', 'emphasis']) jobs.push({ type, file, dir });
+    const needsEmphasis = batch.some(issue => issue.pages.some(page => page.stories.some(story => !Array.isArray(story.emphasis))));
+    for (const type of ['comments', 'headlines', ...(needsEmphasis ? ['emphasis'] : [])]) jobs.push({ type, file, dir });
   }
 }
 const errors = [];
@@ -40,13 +41,20 @@ const comments = [], headlines = [], emphasis = [];
 for (const dir of parts) {
   comments.push(...JSON.parse(await readFile(path.join(dir, 'comments.json'), 'utf8')));
   headlines.push(...JSON.parse(await readFile(path.join(dir, 'headlines.json'), 'utf8')));
-  emphasis.push(...JSON.parse(await readFile(path.join(dir, 'emphasis.json'), 'utf8')));
+  const emp = await readFile(path.join(dir, 'emphasis.json'), 'utf8').then(JSON.parse, () => null);
+  if (emp) emphasis.push(...emp);
 }
 applyComments(issues, comments);
-const spans = new Map(emphasis.map(e => [e.id, e.emphasis]));
-for (const issue of issues) for (const page of issue.pages) for (const story of page.stories) {
-  story.emphasis = spans.get(feedbackId(issue.date, page.id, story));
-  if (!story.emphasis) throw new Error('Missing emphasis');
+if (emphasis.length) {
+  const spans = new Map(emphasis.map(e => [e.id, e.emphasis]));
+  for (const issue of issues) for (const page of issue.pages) for (const story of page.stories) {
+    story.emphasis = spans.get(feedbackId(issue.date, page.id, story));
+    if (!story.emphasis) throw new Error('Missing emphasis');
+  }
+} else {
+  for (const issue of issues) for (const page of issue.pages) for (const story of page.stories) {
+    emphasis.push({ id: feedbackId(issue.date, page.id, story), emphasis: story.emphasis || [] });
+  }
 }
 for (const entry of headlines) {
   const [date, id] = entry.id.split('/');
