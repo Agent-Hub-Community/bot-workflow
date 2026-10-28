@@ -31,6 +31,10 @@ const sections = issue.pages.filter(page => page.stories?.length).map(page => ({
   heading: page.heading, theme: page.theme, titles: page.stories.map(story => story.title),
 }));
 if (!sections.length) throw new Error(`No page with stories for ${date}`);
+// The layout is fixed in code: main groups, topic groups (group-6 and later) and external news form
+// separate blocks with one blank line between them, so the model only writes the summary lines.
+const blockOf = page => page.id === 'external' ? 2 : Number(page.id?.match(/^group-(\d+)$/)?.[1]) >= 6 ? 1 : 0;
+const blocks = issue.pages.filter(page => page.stories?.length).map(blockOf);
 const notes = notesFile ? await readFile(notesFile, 'utf8') : '';
 const system = `${await readFile(new URL('../prompts/daily-bot.md', import.meta.url), import.meta.url ? 'utf8' : 'utf8')}${notes ? `\n本期注意：\n${notes}` : ''}`;
 
@@ -55,14 +59,21 @@ if (result.model !== llmModel || choice?.finish_reason !== 'stop' || !choice.mes
 }
 const text = choice.message.content.trim();
 const links = (text.match(/https?:\/\/[^\s]+/g) || []);
+const summaries = text.split('\n').map(line => line.trim()).filter(line => line.startsWith('【'));
+const labels = summaries.map(line => line.match(/^【(.+?)】/)?.[1]);
 const problems = [
   ...(text.startsWith(firstLine) ? [] : ['first line']),
   ...(/\*\*|```|^#/m.test(text) ? ['Markdown markup'] : []),
   ...(JSON.stringify(links) === JSON.stringify([overviewUrl]) ? [] : [`links ${JSON.stringify(links)}`]),
   ...(/当天未选编|暂无稿件|无.{0,2}版面/.test(text) ? ['mentions an empty page'] : []),
+  ...(JSON.stringify(labels) === JSON.stringify(sections.map(section => section.label)) ? [] : [`sections ${JSON.stringify(labels)}`]),
+  ...(summaries.some(line => !line.replace(/^【.+?】/, '').trim()) ? ['empty summary'] : []),
 ];
 if (problems.length) throw new Error(`Invalid bot message: ${problems.join('; ')}`);
-await writeFile(output, `${text}\n`, { mode: 0o600 });
+const body = [0, 1, 2].map(block => summaries.filter((_, index) => blocks[index] === block))
+  .filter(lines => lines.length).map(lines => lines.join('\n')).join('\n\n');
+const message = `${firstLine}\n${overviewUrl}\n\n${body}`;
+await writeFile(output, `${message}\n`, { mode: 0o600 });
 await writeFile(`${output}.run.json`, JSON.stringify({ model: result.model, elapsedMs: Date.now() - started,
   usage: result.usage, review: 'pending' }, null, 2), { mode: 0o600 });
-console.log(text);
+console.log(message);

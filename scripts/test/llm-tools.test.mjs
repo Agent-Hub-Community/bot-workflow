@@ -75,6 +75,28 @@ test('bot message covers only pages with stories, links overview once and reject
   await assert.rejects(readFile(output), { code: 'ENOENT' });
 });
 
+test('bot message keeps main groups together and separates topic groups and external news', async t => {
+  const page = (id, label) => ({ id, label, stories: [{ title: `${label} story` }] });
+  const issue = { date: '2026-10-27', pages: [page('group-1', '一群'), page('group-2', '二群'),
+    page('group-6', 'AI Safety'), page('group-8', 'AI4S'), page('external', '外部资讯')] };
+  let order;
+  const f = await setup(t, request => {
+    const { firstLine, overviewUrl, sections } = JSON.parse(request.messages[1].content);
+    const lines = (order ?? sections.map(section => section.label)).map(label => `【${label}】${label} 看点`);
+    return { content: [firstLine, overviewUrl, '', ...lines].join('\n\n') };
+  });
+  const data = path.join(f.dir, 'data.json'), output = path.join(f.dir, 'bot.md');
+  await writeFile(data, JSON.stringify(issue));
+  await f.run('generate-bot.mjs', [data, '2026-10-27', output, '--site', site]);
+  assert.equal(await readFile(output, 'utf8'), [
+    'AgentHub 2026.10.27 日报已上线', `${site}/daily/2026-10-27/overview/`, '',
+    '【一群】一群 看点', '【二群】二群 看点', '',
+    '【AI Safety】AI Safety 看点', '【AI4S】AI4S 看点', '',
+    '【外部资讯】外部资讯 看点', ''].join('\n'));
+  order = ['二群', '一群', 'AI Safety', 'AI4S', '外部资讯'];
+  await assert.rejects(f.run('generate-bot.mjs', [data, '2026-10-27', output, '--site', site]), /Invalid bot message: sections/);
+});
+
 test('call-llm stays within the output cap and leaves no stale answer after a failed call', async t => {
   let status = 200;
   const f = await setup(t, () => ({ status, content: '```json\n{"ok":true}\n```' }));
