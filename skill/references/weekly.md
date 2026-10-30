@@ -67,8 +67,8 @@ node "$BOT/scripts/weekly-select-discussion.mjs" "$BATCH/reader/reader.json" "$B
 原始讨论节选分三步走：
 
 1. `weekly-discussion-evidence.mjs`：让模型按每条故事提到的日期回去翻当天的 `input.json`，把和这个话题相关的消息 ref（形如 `2026-10-20:m0012`）全捞出来。
-2. `weekly-attach-discussions.mjs`：对照同日同群的 `raw.json` 补齐引用回复，按 `日期/群/pN` 区分发言人（不会把周二的 `p1` 和周三的 `p1` 当成同一个人），并在单条故事内部编成“群友 1”“群友 2”，同时把正文里出现的跨群昵称也替换掉。如果有审稿确认要剔除的消息或引用，加 `--exclusions "$BATCH/discussion-exclusions.json"` 传进去。
-3. `weekly-select-discussion.mjs`：把过长的对话筛到 20 到 40 条主干回合，去掉复读、纯表情和“+1”。务必带上 `--audit "$BATCH/discussion-audit.json"`，这样筛掉中间某几条后，留下的消息仍然保持原来的“群友 N”编号，引用头也不会串人。
+2. `weekly-attach-discussions.mjs`：对照同日同群的 `raw.json` 补齐引用回复，按 `日期/群/pN` 区分发言人（不会把周二的 `p1` 和周三的 `p1` 当成同一个人），并在单条故事内部编成“群友 1”“群友 2”，保留原始消息正文不作改写。如果有审稿确认要剔除的消息或引用，加 `--exclusions "$BATCH/discussion-exclusions.json"` 传进去。
+3. `weekly-select-discussion.mjs`：对超长对话做清理，保留完整讨论来回、猜测与玩梗，复读刷屏或接龙只留一两条代表，去掉其余重复复读、纯表情和无关插话。务必带上 `--audit "$BATCH/discussion-audit.json"`，这样筛掉中间某几条后，留下的消息仍然保持原来的“群友 N”编号，引用头也不会串人。
 
 讨论配好并复核无误后，入库并生成导览草稿：
 

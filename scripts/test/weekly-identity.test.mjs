@@ -117,7 +117,9 @@ test('same-day p1 repeats but cross-day p1 and cross-day nickname never merge', 
   assert.equal(audit[3].quoteTarget, `${first}:m0001`);
   assert.equal(audit[3].sourceSpeaker, `${second}/${group}/p2`);
   assert.ok(discussion.every(m => m.continues === false));
-  assert.doesNotMatch(JSON.stringify(discussion), /Alice|Bob|Cathy|sourceSpeaker|quoteTarget|m000|group-1|rawSender/);
+  assert.equal(discussion[1].text, 'Alice added a second concrete observation.');
+  assert.equal(discussion[4].text, 'Bob, the constraint is useful.');
+  assert.doesNotMatch(JSON.stringify(discussion), /Cathy|sourceSpeaker|quoteTarget|m000|group-1|rawSender|↳/);
   assert.ok(discussion.every(m => Object.keys(m).every(key => ['speaker', 'time', 'text', 'quote', 'continues'].includes(key))));
   validateDiscussionAudit(discussion, audit);
 });
@@ -154,7 +156,7 @@ test('unknown quotes anonymize generically; known quotes use the target day, not
     { sender: 'Bob', speaker: 'p2', content: '[引用] A reply  ↳ Alice: Alice described a reproducible test in several careful steps.' },
     { sender: 'Cathy', speaker: 'p3', content: '[引用] Another reply  ↳ Unknown: Alice made an unrecorded statement.' },
   ])]);
-  const { discussion } = buildDiscussion(all, all.map(m => m.ref));
+  const { discussion } = buildDiscussion(all, all.map(m => m.ref), { maskNames: true });
   assert.match(discussion[2].quote.text, /^群友 1 described/);
   assert.match(discussion[3].quote.text, /^群友 made/);
   assert.equal(discussion[3].quote.speaker, null);
@@ -166,7 +168,7 @@ test('nickname replacement uses whole English words and longest names first', ()
     { sender: 'allen smith', speaker: 'p2', content: 'allen smith meets allen; allensmith is a separate token.' },
     { sender: 'longname', speaker: 'p3', content: 'longname and longnameSuffix are distinct.' },
   ])]);
-  const { discussion } = buildDiscussion(all, all.map(m => m.ref));
+  const { discussion } = buildDiscussion(all, all.map(m => m.ref), { maskNames: true });
   assert.equal(discussion[0].text, '群友 1 answers a challenge; CHALLENGE stays. @群友 1，群友 1哥 agrees.');
   assert.equal(discussion[1].text, '群友 2 meets 群友 1; allensmith is a separate token.');
   assert.equal(discussion[2].text, '群友 3 and longnameSuffix are distinct.');
@@ -179,7 +181,7 @@ test('nickname masking preserves sanitized public URLs in messages and quotes', 
     { sender: 'allen', content: text },
     { sender: 'Bob', speaker: 'p2', content: `[引用] I checked ${url}.  ↳ allen: ${text}` },
   ])]);
-  const { discussion } = buildDiscussion(all, all.map(m => m.ref));
+  const { discussion } = buildDiscussion(all, all.map(m => m.ref), { maskNames: true });
   assert.equal(discussion[0].text, `群友 1 shared ${url}，群友 1 can answer follow-up questions.`);
   assert.equal(discussion[1].text, `I checked ${url}.`);
   assert.equal(discussion[1].quote.text, discussion[0].text);
@@ -193,7 +195,7 @@ test('selection preserves gaps, text labels and original audit across repeated p
   assert.equal(selected.discussion[1].quote.speaker, null);
   assert.equal(selected.discussion[2].quote.speaker, 2);
   assert.equal(selected.discussion[2].text, initial.discussion[4].text);
-  assert.match(selected.discussion[2].text, /群友 2/);
+  assert.match(selected.discussion[2].text, /Bob/);
   assert.equal(selected.audit[1].quoteTarget, `${first}:m0001`);
   assert.equal(selected.audit[1].quoteSpeaker, 1);
   const samePersonDifferentMessage = selectDiscussion(initial.discussion, [1, 3], initial.audit);

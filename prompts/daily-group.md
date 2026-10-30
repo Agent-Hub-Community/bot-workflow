@@ -53,6 +53,6 @@
 {"heading":"短标题","theme":"简短副题","stories":[{"category":"短标签","title":"具体的标题","text":"正文","topic_key":"唯一主题标识","evidence_ids":["m0001"],"claims":[{"text":"正文里的一个信息点","kind":"discussion_position","evidence_ids":["m0001"]}],"comment":"","selection_reason":"为何值得读"}],"resources":[],"audit":{"omitted":[],"uncertainties":[]}}
 
 - title 具体、有信息，可以俏皮，不当标题党。text 是纯文本，不用 Markdown 或 HTML。
-- evidence_ids 列出支持这一条的消息 id。claims 列出正文里的主要信息点，kind 只用 discussion_position、reported_experience、open_question、shared_link；每个 claim 的 evidence_ids 必须包含在所属 story 的 evidence_ids 里。comment 留空字符串。
+- evidence_ids 列出这一条“原始讨论”面板要收录的全部消息 id：包含围绕该话题的完整对话来回、提问、回答、追问、未证实的猜测、吐槽和玩梗；复读刷屏或接龙只留一两条代表，其余重复复读、纯 `[表情]` 和无关插话不收。claims 列出正文里的主要信息点，kind 只用 discussion_position、reported_experience、open_question、shared_link；每个 claim 的 evidence_ids 只填支撑该句正文的直接证据，且必须包含在所属 story 的 evidence_ids 里。comment 留空字符串。
 - resources 每项写成 {"label":"简短名称","url":"完整链接","evidence_ids":["含该链接的消息 id"]}。url 必须是输入里以 http:// 或 https:// 开头的完整链接，逐字复制，不补全、不改写；没有协议头的链接不放。没有合适链接时返回 []。
 - 对材料的疑问、核实待办和舍弃理由写进 audit，不写进正文。

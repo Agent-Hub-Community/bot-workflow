@@ -58,7 +58,7 @@ node "$BOT/scripts/weekly-select-discussion.mjs" "$BATCH/reader/reader.json" "$B
 ```
 
 - `generate-weekly-gemini.mjs` 用 `prompts/weekly-editor-gemini.md` 为每个群写整周回顾；`generate-weekly-emphasis.mjs` 补选重点短句。
-- 后面三个 `weekly-*-discussion*.mjs` 脚本负责给周报话题配原始讨论节选：先让模型按日期找出话题涉及的消息 ref，再结合 `raw.json` 补齐同日引用回复、把跨群昵称统一换成“群友 N”，最后筛出 20 到 40 条主干对话。传 `--audit` 能保证筛掉废话后原有的“群友 N”编号不重排，也不会把不同天碰巧同叫 `p1` 的两个人混成同一个人。
+- 后面三个 `weekly-*-discussion*.mjs` 脚本负责给周报话题配原始讨论节选：先让模型按日期找出话题涉及的消息 ref，再结合 `raw.json` 补齐同日引用回复并把发言人身份编成“群友 N”（保留原始消息正文不改写），最后去掉复读刷屏（留一两条代表）、纯表情和无关插话。传 `--audit` 能保证筛掉废话后原有的“群友 N”编号不重排，也不会把不同天碰巧同叫 `p1` 的两个人混成同一个人。
 
 ## 4. 导览文案与通用模型调用
 
