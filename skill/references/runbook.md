@@ -22,7 +22,7 @@ WX_ACTIVITY_HOME="$WX_HOME" node "$PIPELINE/prepare-release-activity.mjs" "$BATC
 
 - 采集完看一眼各群条数。如果某群返回 0 条，确认是当天真没人说话还是客户端未同步。
 - `collect-images.mjs` 把聊天图片解到 `$BATCH/$D/media/`，调视觉模型写客观描述，塞进 `group-N.input.json` 的 `image` 字段（按图片 md5 缓存在 `scratch/image-descriptions/`）。
-- 初稿跑完后，按[编辑标准](editorial-standards.md)对照 `raw.json` 审稿：删掉水帖，拆开被硬并在一起的两件事，改掉张冠李戴、数字错误和隐私暴露。逐条检查 `emphasis` 下划线片段、资料链接和匿名讨论节选，直接更新 `$BATCH/issues.json`（或整理 `$BATCH/attachments.json`），跑一步校验：
+- 初稿跑完后，按[编辑标准](editorial-standards.md)对照 `raw.json` 审稿：删掉水帖，拆开被硬并在一起的两件事，改掉张冠李戴、数字错误和隐私暴露。逐条检查 `emphasis` 下划线片段、资料链接和匿名讨论节选（`discussion` 保留围绕该话题的完整对话来回、提问、回答、猜测与玩梗，复读刷屏或接龙只留一两条代表，只将发言人身份及 `↳` 引用头转为“群友 N”，不修改原始消息正文与 `@昵称`），直接更新 `$BATCH/issues.json`（或整理 `$BATCH/attachments.json`），跑一步校验：
 
 ```sh
 node "$BOT/scripts/finalize-batch.mjs" "$BATCH"
