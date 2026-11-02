@@ -8,6 +8,32 @@
 - 相对路径按当前目录解析，批次目录一般放在 `newspaper/scratch/` 下（已被 Git 忽略）。
 - 脚本通过 `lib/newspaper-root.mjs` 找 `newspaper` 仓库：优先读 `NEWSPAPER_DIR`，没设就找本仓库旁边的 `../newspaper`。`linkedom` 等第三方包也从 `newspaper/node_modules` 加载。
 
+## 0. 一条命令准备日报（daily.mjs）
+
+```sh
+node "$BOT/scripts/daily.mjs" prepare "$D" [--batch DIR] [--external DIR] [--from-step STEP[,STEP]] [--dry-run]
+```
+
+`daily.mjs prepare` 运行下面第 1 节和第 2 节的采集与写稿命令，分两条线同时跑：
+
+```text
+主线（依次）：collect-batch -> collect-images -> generate -> package -> enrich -> release-activity
+并行：collect-external
+```
+
+- 主线每步读上一步的输出，所以一步跑完才开始下一步。读微信库的三步（`collect-batch`、`collect-images`、`release-activity`）都在主线上，因此不会同时读库。`collect-external` 不读库，和主线同时跑。不要同时另开其他读库命令。
+- `generate` 带 `--resume`：续跑时跳过已有合格初稿的群，只重写缺稿或不合格的群。
+- 默认目录是 `$NEWSPAPER/scratch/day-D-runN` 和 `external-D-runN`。N 取两个目录都不存在的最小编号。
+- 每步的输出写到 `批次目录/logs/<步骤名>.log`，终端只显示开始、完成和失败。
+- 开始前检查环境变量：选中的步骤要读库时需要 `WX_ACTIVITY_HOME`，要调模型时需要 `DAILY_LLM_BASE_URL`、`DAILY_LLM_MODEL` 和 `DAILY_LLM_API_KEY`。缺任何一个都不会启动。
+- `collect-batch` 跑完后立即列出各群条数（读 `批次目录/D/group-*.raw.json`）。0 条或没有 raw.json 的群标 `!!`，要核实是当天没人说话还是客户端未同步；发现未同步时，可以在模型写稿前停下脚本。结束时再列一次，并提示检查 `批次目录/activity/avatar-review.json` 的 `pending`：新头像逐张看过、`pending` 清空后才能发布。
+- 主线某步失败后，主线停下，脚本等 `collect-external` 结束，然后打印续跑命令。续跑命令带 `--batch` 和 `--from-step <失败的步骤>`，从这一步起把主线跑完。
+- `collect-external` 失败不影响主线，只在结束时告警：外部资讯需要按日志补查，或用脚本给出的命令单独重跑 `node "$BOT/scripts/collect-external.mjs" D EXTERNAL`。`collect-external` 拒绝已有快照的目录，所以已写出 `discovery.json` 时，脚本给出新的 `EXTERNAL` 目录。
+- `--from-step` 从列出的最早主线步骤开始跑完主线；只有列出 `collect-external` 时才跑它。续跑必须带 `--batch`，且 `批次目录/D` 必须已经存在，否则脚本在开始前报错。
+- `--dry-run` 只打印目录和计划，不创建目录，也不运行命令。
+
+脚本跑完后，按第 1 节的说明审稿，再跑 `finalize-batch.mjs`；外部资讯从第 2 节的补查和 `selection.json` 继续。
+
 ## 1. 日报流程
 
 ```sh
