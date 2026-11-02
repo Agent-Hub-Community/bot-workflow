@@ -34,6 +34,17 @@ node "$SKILL_DIR/scripts/weekly-window.mjs" --from 2026-10-19 --through 2026-10-
 - 生成脚本是 `$BOT/scripts/generate-weekly-gemini.mjs`，prompt 是 `$BOT/prompts/weekly-editor-gemini.md`（周报默认不开 `reasoning_effort: high`，免得长输入把输出 token 预算耗光）。
 - 每版周报有一个总标题（提炼这群本周最有意思的看点）和简短导语。每条故事写清日期、具体做法或争论点，配一句 AI 锐评、重点下划线和最多一个公开链接。
 - 文风和日报一样：直接写事，少来“讨论重心逐步聚焦”“形成闭环”那套总结腔。
+- 生成脚本每群独立：某群失败不影响其他群，已有 `<group>.json` 的群默认跳过，失败的群重跑时会先复用已存的响应，模型抄错的重点片段会被丢掉并记进 `run.json`。重跑整群用 `--force`。之后跑 `generate-weekly-emphasis.mjs` 重选重点，它也按页独立处理；只重跑某几页时用 `--pages group-1,external`。
+
+### 审稿
+
+每群一个编辑，加一个复核人：
+
+1. 编辑对照七天原始消息审整版，直接交出定稿页 `$BATCH/review/<group>.page.json`：`{title, intro, stories:[{title,text,review,emphasis,dates,kind,timeline,resources}]}`。审稿只查[编辑标准](editorial-standards.md)的六类硬伤，并负责跨日合并、拆开硬揉的话题、补漏选、补 `dates`／`timeline`／`resources`（原稿的 `url` 字段要转成 `resources`）。
+2. 复核人对这一版回到原文挑错，只交逐字替换 `$BATCH/review/<group>.ops.json`：`[{storyTitle, field, find, replace}]`。
+3. `assemble-weekly-reader.mjs` 应用替换、校正重点、限定日期，并合上周榜和外部资讯，写出 `$BATCH/reader/reader.json`；替换不上的写进 `$BATCH/review/manual.json`，由人处理。
+
+周报值得保留复核人：2026-10-26 那周复核提出的 84 处问题里，65 处靠自动替换直接修掉，多数是张冠李戴和把猜测写成定论。
 
 ## 4. 一周外部资讯
 
@@ -46,7 +57,11 @@ node "$SKILL_DIR/scripts/weekly-window.mjs" --from 2026-10-19 --through 2026-10-
 
 周报里的周榜按群单算（每个群列出本周发言最多的前 3 名），和日报里的“全社区合并榜”不是一回事，也不直接把七天日榜的前三名加起来算。
 
-用同一周各群去重后的原始记录和 `$NEWSPAPER/lib/activity.mjs` 的计分规则算出各群 Top 3，新头像逐张肉眼审过。周报的榜单快照只跟这一期周报走，不改动日报正在用的 `data/public-activity/snapshot.json`。
+```sh
+WX_ACTIVITY_HOME="$WX_HOME" node "$PIPELINE/prepare-weekly-rank.mjs" "$BATCH"
+```
+
+它在临时目录里把全部群（含专项群）当作有版面的群调用活跃榜计算，只取各群本周 Top 3，写 `$BATCH/rank.json`、复制头像，并列出待看的头像；占位图自动剔除。周报的榜单只跟这一期周报走，不改动日报正在用的 `data/public-activity/snapshot.json`。
 
 ## 6. 跑通周报与原始讨论节选
 
@@ -54,10 +69,15 @@ node "$SKILL_DIR/scripts/weekly-window.mjs" --from 2026-10-19 --through 2026-10-
 
 ```sh
 WX_ACTIVITY_HOME="$WX_HOME" node "$PIPELINE/collect-batch.mjs" FROM THROUGH "$BATCH"
+for d in FROM … THROUGH; do WX_ACTIVITY_HOME="$WX_HOME" node "$PIPELINE/collect-images.mjs" "$d" "$BATCH"; done
 node "$BOT/scripts/generate-weekly-gemini.mjs" FROM THROUGH "$BATCH" "$BATCH/weekly-pages" --groups "$GROUPS"
 node "$BOT/scripts/generate-weekly-emphasis.mjs" "$BATCH/weekly-pages"
+WX_ACTIVITY_HOME="$WX_HOME" node "$PIPELINE/prepare-weekly-rank.mjs" "$BATCH"
 
-# 审完各群与外部资讯、组装出 $BATCH/reader/reader.json 之后，配原始讨论节选：
+# 编辑交出 review/<group>.page.json、复核人交出 review/<group>.ops.json，外部资讯版存为 external-page.json 后：
+node "$BOT/scripts/assemble-weekly-reader.mjs" "$BATCH" --from FROM --through THROUGH
+
+# 配原始讨论节选：
 node "$BOT/scripts/weekly-discussion-evidence.mjs" "$BATCH/reader/reader.json" "$BATCH" "$BATCH/evidence"
 node "$BOT/scripts/weekly-attach-discussions.mjs" "$BATCH/reader/reader.json" "$BATCH" "$BATCH/evidence" "$BATCH/discussion-audit.json"
 node "$BOT/scripts/weekly-select-discussion.mjs" "$BATCH/reader/reader.json" "$BATCH/select" \
@@ -87,7 +107,7 @@ node "$BOT/scripts/generate-weekly-bot.mjs" "data/weekly-editions/FROM_THROUGH.j
 WX_ACTIVITY_HOME="$WX_HOME" node "$PIPELINE/collect-library-candidates.mjs" --since <library 的 through 次日>
 # 按 newspaper/docs/review/library.md 审核，写到 scratch/library/curated/*.json
 node scripts/check-library-review.mjs
-node scripts/assemble-library.mjs          # 逐张看过新头像、写好 avatar-review.json 后再跑一次
+node scripts/assemble-library.mjs          # 新头像拼图看一遍、写好 avatar-review.json 后再跑一次；占位图自动剔除
 
 node "$PIPELINE/collect-opportunity-candidates.mjs" --since <opportunities 的 through 次日>
 # 按 newspaper/docs/review/opportunities.md 审核，写到 scratch/opportunities/reviewed.json
@@ -101,28 +121,20 @@ node "$PIPELINE/collect-glossary-chunks.mjs" --since <glossary 的 through 次�
 
 ## 8. 预览、验收与发布
 
-把周报和资料库增量合在一起跑本地构建与浏览器测试：
+周报入库前先在本地看：`import-reviewed-weekly.mjs` 只改工作区里未提交的 `data/`，然后普通构建（不加 `--public`）并跑测试：
 
 ```sh
-npm test
-npm run build
-node test/build.mjs
-node test/library-browser.mjs
+node scripts/import-reviewed-weekly.mjs "$BATCH/reader"
+npm run build && npm test && node test/build.mjs && node test/library-browser.mjs
 VERIFY_SITE="http://127.0.0.1:$PORT/newspaper" node test/weekly-browser.mjs
 ```
 
-在 375px 和 1440px 下抽检各群周报页、外部资讯页和周榜页。
+`test/library-browser.mjs` 要求 `dist/` 是普通构建；公开构建的爱心会连线上接口，测试会在开头直接报错提示。在 375px 和 1440px 下抽检各群周报页、外部资讯页和周榜页。
 
-拿到发布同意后，跑公开构建、登记 D1 点心与反馈目录、更新语义向量并推送部署：
+拿到发布同意后，周报已在 `data/` 里，用同一条发布命令（日报和周报同一天发时一起传）：
 
 ```sh
-FEEDBACK_API_URL="$FEEDBACK_API_URL" npm run build -- --public
-node scripts/feedback-catalog.mjs dist/data.js "$BATCH/feedback-catalog.sql"
-"$WRANGLER_BIN" d1 execute agenthub-feedback --remote --config feedback/wrangler.jsonc --file "$BATCH/feedback-catalog.sql"
-node scripts/embed-catalog.mjs
-FEEDBACK_API_URL="$FEEDBACK_API_URL" npm run build -- --public
-npm test
-node test/build.mjs --public
+node scripts/release.mjs --sql-out "$BATCH/feedback-catalog.sql" [--daily-batch … --external-draft … --external-selection …]
 ```
 
-把 `data/weekly-editions/`、`data/weekly-assets/`、`data/library.json`、`data/library-avatars/`、`data/opportunities.json`、`data/glossary.json` 和 `data/semantic-vectors.json` 一起提交推送，等 Pages 部署完成后核对线上页面与搜索接口。
+核对 `git status` 只改了 `data/` 后提交推送，等 Pages 部署完成，核对线上周报页和搜索向量文件（`search/vectors.json`、`vectors.bin` 与本地一致）。

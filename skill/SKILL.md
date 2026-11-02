@@ -43,14 +43,13 @@ description: "生成 Agent Hub 社区日报或自然周周报：从本机微信�
 
 ## 一期日报怎么跑
 
-先分清是日报还是周报。周报直接看[周报流程](references/weekly.md)；下面是日报的 6 个步骤，具体命令看[操作手册](references/runbook.md)，审稿要求看[编辑标准](references/editorial-standards.md)。
+先分清是日报还是周报。周报直接看[周报流程](references/weekly.md)；下面是日报的 5 步，命令看[操作手册](references/runbook.md)，审稿要求看[编辑标准](references/editorial-standards.md)。脚本负责搬运、排序和格式校验；人和 agent 只做脚本做不了的判断：核对事实、隐私，看头像。
 
-1. 定下日期 `D`、北京时间窗口和本轮做预览还是发布。串行导出各群整日消息和图片描述，算好 `$BATCH/activity/` 活跃榜；外部资讯可以同时开跑。注意同一个微信账号的数据库读取不要并发。
-2. 调模型生成各群初稿、报头、重点和 AI 锐评（`prepare-week-d.mjs generate/package` + `enrich-month-d.mjs`）。对照 `raw.json` 核对原话、谁说的、谁回谁的，删掉注水条目，把同一人连发的工具合并，改掉事实和隐私问题。
-3. 外部资讯按[资讯补查](references/external-sources.md)把脚本没扫到的来源补齐，点开原文核实后写 `selection.json`，再调模型写稿和锐评。
-4. 逐张检查新上榜成员的头像并清空 `avatar-review.json` 的 `pending`；逐条审核正文里的 `emphasis` 下划线片段；把资料链接和匿名讨论节选合进 `$BATCH/issues.json`，跑 `node "$BOT/scripts/finalize-batch.mjs" "$BATCH"` 做 schema 与隐私校验。
-5. 跑 `prepare-preview.mjs` 生成本地预览，抽检手机（375px）和桌面（1440px）版面、讨论弹窗与榜单，再生成一条合并导览草稿。如果本轮只做预览，到这里交付。
-6. 如果已获准发布，跑 `publish-reviewed-batch.mjs`、`import-external-report.mjs`、公开构建、`embed-catalog.mjs`、D1 反馈目录登记和 `npm test`，提交推送并确认 GitHub Actions 部署成功，生成正式版导览文案，把链接、提交 SHA 交给用户，并注明导览尚未发群。
+1. 准备：`node "$BOT/scripts/daily.mjs" prepare D` 一条命令完成采集、读图、外部资讯基础候选、模型初稿和活跃榜。它会自动串行读微信库，并行跑其余步骤。跑完看汇总，某群 0 条时，先核实是没人说话还是客户端没同步。
+2. 审稿：每个有稿的群交给一个编辑，对照 `raw.json` 只查[编辑标准](references/editorial-standards.md)里的六类硬伤，并顺带看有没有漏掉的实质话题。编辑直接写审稿补丁（patch），`apply-review.mjs` 自动落改、截讨论节选、挂资料卡片，`finalize-batch.mjs` 做格式与隐私校验。占位头像由脚本自动剔除，人只看一张新头像拼图。
+3. 外部资讯：按[资讯补查](references/external-sources.md)扫完各来源，先挑出要用的条目，再只核实这些条目的一手原文，写 `selection.json` 后调模型写稿和锐评。
+4. 预览：`prepare-preview.mjs` 生成本地预览，抽检手机（375px）和桌面（1440px）版面，再生成导览草稿。只做预览时到这里交付。
+5. 发布（需用户同意）：`node scripts/release.mjs …` 一条命令完成入库、公开构建、语义向量、测试和 D1 登记，然后提交推送，等部署成功后跑 `verify-publication.mjs` 和上线版导览，把链接和提交 SHA 交给用户，注明导览没有发群。
 
 ## 资料库、机会、黑话与语义向量
 
