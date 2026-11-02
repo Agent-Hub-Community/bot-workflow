@@ -6,10 +6,12 @@ import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
 import { load, root as newspaperRoot } from '../lib/newspaper-root.mjs';
 import { chatGroups } from './chat-groups.mjs';
+import { realpathSync } from 'node:fs';
 
 const { dayOf, startOf, deduplicate, summarize } = await load('lib/activity.mjs');
 const { validatePublicActivity } = await load('lib/public-activity.mjs');
 const { digests } = await load('lib/digest.mjs');
+const { isPlaceholderAvatar } = await load('lib/avatar-placeholders.mjs');
 
 // Reads the approved data/public-activity/ snapshot of the newspaper checkout; writes only to BATCH/activity/.
 //   WX_ACTIVITY_HOME=... node "$PIPELINE/prepare-release-activity.mjs" BATCH
@@ -80,7 +82,7 @@ snapshot.windows = Object.fromEntries(Object.entries(bounds).map(([id, start]) =
 const keys = new Set([...Object.keys(approved.avatars), ...Object.values(approved.ranks).flatMap(s => s.leaders.map(m => m.key)),
   ...approved.groups.flatMap(g => Object.values(g.daily).flatMap(s => s.leaders.map(m => m.key)))]);
 let serial = Math.max(0, ...[...keys].map(key => Number(key.slice(7))));
-const mapping = new Map(), pending = [], failures = [];
+const mapping = new Map(), pending = [], failures = [], autoRejected = [];
 const contact = new DatabaseSync(cache['contact/contact.db'].path, { readOnly: true });
 try {
 for (const stat of [
@@ -105,6 +107,8 @@ for (const stat of [
         const ext = bytes.subarray(0, 3).equals(Buffer.from([255, 216, 255])) ? 'jpg'
           : bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ? 'png' : null;
         assert.ok(ext && bytes.length < 2_000_000, 'Invalid image');
+        // WeChat's "暂时无法查看" image is never a real avatar: skip it without review, keep the rank.
+        if (isPlaceholderAvatar(bytes)) { autoRejected.push({ key, reason: 'placeholder' }); continue; }
         const file = `avatars/${key}.${ext}`;
         await writeFile(path.join(out, file), bytes, { mode: 0o600 });
         snapshot.avatars[key] = file;
@@ -137,12 +141,12 @@ for (const group of approved.groups) {
   }
 }
 await writeFile(path.join(out, 'snapshot.json'), JSON.stringify(snapshot, null, 2));
-await writeFile(path.join(out, 'avatar-review.json'), JSON.stringify({ pending, failures }, null, 2));
+await writeFile(path.join(out, 'avatar-review.json'), JSON.stringify({ pending, failures, autoRejected }, null, 2));
 await writeFile(path.join(out, 'private-audit.json'), JSON.stringify({ date, stats, mapping: Object.fromEntries(mapping), coverage: `${groups.length} groups; local retained history only` }, null, 2), { mode: 0o600 });
-console.log(JSON.stringify({ date, counts: Object.fromEntries(Object.entries(stats.daily).map(([id, stat]) => [id, stat.raw])), pending, failures }, null, 2));
-return { snapshot, stats, pending, failures };
+console.log(JSON.stringify({ date, counts: Object.fromEntries(Object.entries(stats.daily).map(([id, stat]) => [id, stat.raw])), pending, failures, autoRejected }, null, 2));
+return { snapshot, stats, pending, failures, autoRejected };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   await prepareReleaseActivity(process.argv[2]);
 }
