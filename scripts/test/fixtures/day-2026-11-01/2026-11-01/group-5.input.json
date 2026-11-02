@@ -1,0 +1,23 @@
+{
+ "group": {
+  "id": "group-5",
+  "label": "五群"
+ },
+ "date": "2026-11-01",
+ "messages": [
+  {
+   "id": "m0001",
+   "time": "2026-11-01 00:56",
+   "speaker": "p1",
+   "type": "文本",
+   "content": "这里看更方便"
+  },
+  {
+   "id": "m0002",
+   "time": "2026-11-01 00:56",
+   "speaker": "p1",
+   "type": "链接/文件",
+   "content": "[链接] Super-agent 设计探索：迈向更自主的 Agent 系统\n  摘要: 我在知乎发现了一篇值得思考的文章，一起来看看吧。\n  URL: https://zhuanlan.zhihu.com/p/2099987320443237060"
+  }
+ ]
+}
