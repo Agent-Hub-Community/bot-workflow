@@ -157,7 +157,7 @@ test('resource audit retains input status and candidates without file hashes or 
   assert.equal(await readFile(draftPath, 'utf8'), draftBytes);
 });
 
-test('daily and weekly generators accept three paragraph highlights and reject a third overlapping span', async t => {
+test('daily and weekly generators accept three paragraph highlights; a third overlapping span fails daily and is dropped weekly', async t => {
   for (const kind of ['emphasis', 'weekly-emphasis', 'weekly-gemini']) {
     await t.test(kind, async t => {
       const dir = await directory(t);
@@ -198,8 +198,14 @@ test('daily and weekly generators accept three paragraph highlights and reject a
       const result = JSON.parse(bytes);
       assert.deepEqual(kind === 'emphasis' ? result[0].emphasis : result.stories[0].emphasis, good);
       phrases = bad;
-      await assert.rejects(() => exec(process.execPath, command, { env, timeout: 20000 }), /[Oo]verlapping.*emphasis/);
-      assert.equal(await readFile(output, 'utf8'), bytes);
+      if (kind === 'emphasis') {
+        await assert.rejects(() => exec(process.execPath, command, { env, timeout: 20000 }), /[Oo]verlapping.*emphasis/);
+        assert.equal(await readFile(output, 'utf8'), bytes);
+      } else {
+        // Weekly generators drop the overlapping span instead of failing the page; --force reruns an existing draft.
+        await exec(process.execPath, kind === 'weekly-gemini' ? [...command, '--force'] : command, { env, timeout: 20000 });
+        assert.deepEqual(JSON.parse(await readFile(output, 'utf8')).stories[0].emphasis, ['alpha', 'beta gamma']);
+      }
     });
   }
 });

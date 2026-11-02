@@ -1,10 +1,11 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { llmModel, llmUrl, llmHeaders, llmMaxOutputTokens } from '../lib/llm.mjs';
 import { load } from '../lib/newspaper-root.mjs';
 import { modelMessages } from '../lib/weekly-discussion.mjs';
-const { validateEmphasis } = await load('lib/emphasis.mjs');
+const { trimEmphasis } = await load('lib/emphasis.mjs');
 const { modelInput } = await load('lib/image-messages.mjs');
 const { collectedGroups, groupIds, isGroupId, pageGroups, weeklyGroups } = await load('lib/groups.mjs');
 const weeklySectionGroups = weeklyGroups || pageGroups;
@@ -12,12 +13,13 @@ const weeklySectionGroups = weeklyGroups || pageGroups;
 const root = fileURLToPath(new URL('../', import.meta.url));
 const [from, through, inputDirArg, outputDirArg] = process.argv.slice(2);
 if (![from, through].every(date => /^\d{4}-\d{2}-\d{2}$/.test(date)) || !inputDirArg || !outputDirArg) {
-  throw new Error('Usage: generate-weekly-gemini.mjs FROM THROUGH INPUT_DIR OUTPUT_DIR [--prior FILE] [--groups group-1,...]');
+  throw new Error('Usage: generate-weekly-gemini.mjs FROM THROUGH INPUT_DIR OUTPUT_DIR [--prior FILE] [--groups group-1,...] [--force]');
 }
 const inputDir = path.resolve(inputDirArg);
 const outputDir = path.resolve(outputDirArg);
 const priorFlag = process.argv.indexOf('--prior');
 const prior = priorFlag >= 0 ? JSON.parse(await readFile(path.resolve(process.argv[priorFlag + 1]), 'utf8')) : null;
+const force = process.argv.includes('--force');
 const model = llmModel;
 const dates = [];
 for (let time = Date.parse(`${from}T00:00:00Z`); time <= Date.parse(`${through}T00:00:00Z`); time += 86400000) {
@@ -45,33 +47,67 @@ async function messagesFor(group) {
 function cleanJson(content) {
   return content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
 }
+// Page structure errors still fail the group. Emphasis spans that validateEmphasis would reject (usually a
+// miscopied character, on 2026-11-02 one such span used to abort every group) are dropped and returned for run.json.
 function validatePage(page, group) {
   if (!page || typeof page.title !== 'string' || !page.title.trim() ||
       typeof page.intro !== 'string' || !page.intro.trim() || !Array.isArray(page.stories) || !page.stories.length) {
     throw new Error(`${group}: invalid page shape`);
   }
-  for (const story of page.stories) {
+  const emphasisDropped = [];
+  page.stories.forEach((story, index) => {
     if (!story || typeof story.title !== 'string' || !story.title.trim() ||
         typeof story.text !== 'string' || !story.text.trim() ||
         typeof story.review !== 'string' || !story.review.trim() || !Array.isArray(story.emphasis)) {
       throw new Error(`${group}: invalid story shape`);
     }
-    validateEmphasis(story.text, story.emphasis, {
-      invalidMessage: `${group}: invalid emphasis span`, overlapMessage: `${group}: overlapping emphasis span`,
-    });
     if (story.url && !/^https:\/\/[^\s]+$/.test(story.url)) throw new Error(`${group}: unsafe URL`);
     if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(`${story.title}${story.text}${story.review}`)) {
       throw new Error(`${group}: control character in story`);
     }
-  }
+    const { kept, dropped } = trimEmphasis(story.text, story.emphasis);
+    story.emphasis = kept;
+    for (const { phrase, reason } of dropped) emphasisDropped.push({ story: index, title: story.title, phrase, reason });
+  });
+  return emphasisDropped;
 }
-async function generate(group) {
-  const messages = await messagesFor(group);
+const file = (group, suffix) => path.join(outputDir, `${group}${suffix}`);
+function promptFor(group, messages) {
   const priorPage = prior?.pages?.find(page => page.id === group);
-  const input = `${prompt}\n\n本次刊期：${from} 至 ${through}。群别：${group}。\n` +
+  return `${prompt}\n\n本次刊期：${from} 至 ${through}。群别：${group}。\n` +
     (priorPage ? `上一版仅作为选题索引，不是事实来源；请以原始消息为准：\n${JSON.stringify(priorPage.stories.map(({ title, text }) => ({ title, text })))}\n\n` : '') +
     `全部原始消息如下。date 是消息日期，speaker 只是匿名定位符，不得输出：\n${JSON.stringify(messages)}`;
-  await writeFile(path.join(outputDir, `${group}.prompt.md`), input, { mode: 0o600 });
+}
+async function save(group, result, messages, extra) {
+  if (result.model !== model || result.choices?.[0]?.finish_reason !== 'stop') throw new Error(`${group}: unexpected model or incomplete response`);
+  const page = JSON.parse(cleanJson(result.choices[0].message.content));
+  const emphasisDropped = validatePage(page, group);
+  await writeFile(file(group, '.json'), JSON.stringify(page, null, 2) + '\n', { mode: 0o600 });
+  await writeFile(file(group, '.run.json'), JSON.stringify({ model, messages: messages.length, stories: page.stories.length,
+    ...extra, ...(emphasisDropped.length ? { emphasisDropped } : {}) }, null, 2) + '\n', { mode: 0o600 });
+  return { group, messages: messages.length, stories: page.stories.length,
+    ...(extra.reusedResponse ? { reusedResponse: true } : {}),
+    ...(emphasisDropped.length ? { emphasisDropped: emphasisDropped.length } : {}) };
+}
+async function generate(group) {
+  if (!force && existsSync(file(group, '.json'))) return { group, skipped: 'exists' };
+  const messages = await messagesFor(group);
+  const input = promptFor(group, messages);
+  // A response saved by a run that failed afterwards is already paid for. It is reused only when the saved
+  // prompt matches this run's prompt, so changed inputs, dates or --prior still reach the model.
+  let reuseError;
+  if (!force && existsSync(file(group, '.response.json'))) {
+    try {
+      if (await readFile(file(group, '.prompt.md'), 'utf8') !== input) throw new Error('saved prompt differs from this run');
+      return await save(group, JSON.parse(await readFile(file(group, '.response.json'), 'utf8')), messages, { reusedResponse: true });
+    } catch (error) {
+      reuseError = error.code === 'ENOENT' ? 'no saved prompt' : error.message;
+    }
+  }
+  // The saved response no longer matches the prompt written next; if this request fails, a rerun must not
+  // pair the old response with the new prompt.
+  await rm(file(group, '.response.json'), { force: true });
+  await writeFile(file(group, '.prompt.md'), input, { mode: 0o600 });
   const started = Date.now();
   const response = await fetch(llmUrl, {
     method: 'POST',
@@ -82,12 +118,18 @@ async function generate(group) {
   });
   if (!response.ok) throw new Error(`${group}: HTTP ${response.status}`);
   const result = await response.json();
-  await writeFile(path.join(outputDir, `${group}.response.json`), JSON.stringify(result, null, 2), { mode: 0o600 });
-  if (result.model !== model || result.choices?.[0]?.finish_reason !== 'stop') throw new Error(`${group}: unexpected model or incomplete response`);
-  const page = JSON.parse(cleanJson(result.choices[0].message.content));
-  validatePage(page, group);
-  await writeFile(path.join(outputDir, `${group}.json`), JSON.stringify(page, null, 2) + '\n', { mode: 0o600 });
-  await writeFile(path.join(outputDir, `${group}.run.json`), JSON.stringify({ model, messages: messages.length, stories: page.stories.length, elapsedMs: Date.now() - started }, null, 2) + '\n', { mode: 0o600 });
-  return { group, messages: messages.length, stories: page.stories.length };
+  await writeFile(file(group, '.response.json'), JSON.stringify(result, null, 2), { mode: 0o600 });
+  // The new response supersedes an earlier page (--force); if it does not parse, a rerun reuses it instead.
+  await rm(file(group, '.json'), { force: true });
+  await rm(file(group, '.run.json'), { force: true });
+  return save(group, result, messages, { elapsedMs: Date.now() - started, ...(reuseError ? { reuseError } : {}) });
 }
-console.log(JSON.stringify(await Promise.all(groups.map(generate)), null, 2));
+// Groups are independent: one failure must not discard the other groups' paid responses.
+const settled = await Promise.allSettled(groups.map(generate));
+const results = settled.map((outcome, index) => outcome.status === 'fulfilled' ? outcome.value
+  : { group: groups[index], error: outcome.reason?.message || String(outcome.reason) });
+console.log(JSON.stringify(results, null, 2));
+if (results.some(result => result.error)) {
+  console.error(`Failed groups: ${results.filter(result => result.error).map(result => result.group).join(', ')}`);
+  process.exitCode = 1;
+}
