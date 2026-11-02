@@ -4,6 +4,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
+import { realpathSync } from 'node:fs';
 
 export function parseData(source) {
   const match = source.match(/^window\.AGENT_HUB_DATA = ([\s\S]+);\s*$/);
@@ -111,7 +112,7 @@ export async function verify({ newspaper, site, date, rankThrough = date, out })
   return receipt;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   try {
     const { values } = parseArgs({ options: {
       newspaper: { type: 'string' }, site: { type: 'string' }, date: { type: 'string' },

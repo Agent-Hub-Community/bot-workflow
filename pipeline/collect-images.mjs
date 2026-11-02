@@ -15,6 +15,7 @@ import { llmHeaders, llmModel, llmUrl } from '../lib/llm.mjs';
 import { load, rootDir } from '../lib/newspaper-root.mjs';
 import { chatGroups } from './chat-groups.mjs';
 import { accountImageKey, convertToJpeg, decodeDat, imageFileHash, locateImage } from './wechat-images.mjs';
+import { realpathSync } from 'node:fs';
 
 const { cleanText } = await load('lib/content.mjs');
 const { imageCoverage } = await load('lib/image-messages.mjs');
@@ -166,7 +167,7 @@ export async function collectImages(date, batch, {
   return { pages: pages.map(({ group, records }) => ({ group, records })), failures };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   const { failures } = await collectImages(process.argv[2], process.argv[3]);
   if (failures.length) {
     console.error(JSON.stringify({ failures }, null, 2));

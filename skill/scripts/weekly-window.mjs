@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {parseArgs} from 'node:util';
 import {pathToFileURL} from 'node:url';
+import { realpathSync } from 'node:fs';
 
 const DAY = 86400000;
 function dateValue(value) {
@@ -37,7 +38,7 @@ export function weeklyWindow({now = new Date().toISOString(), from, through} = {
   };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   try {
     const {values} = parseArgs({options:{
       now:{type:'string'}, from:{type:'string'}, through:{type:'string'},
