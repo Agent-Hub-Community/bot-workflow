@@ -81,7 +81,7 @@ test('bot message keeps one hot line, offers highlights and rewrites overlong li
   let long = true;
   const f = await setup(t, request => {
     const { firstLine, overviewUrl } = JSON.parse(request.messages[1].content);
-    const line = long ? `【四群】${'很长的钩子'.repeat(12)}` : '【四群】“收了 100 份简历只有 3 份能进面试”';
+    const line = long ? `【四群】${'很长的钩子'.repeat(20)}` : '【四群】“收了 100 份简历只有 3 份能进面试”';
     long = false;
     return { content: [firstLine, overviewUrl, '', '🔥 AI 游戏岗百里挑三', '', line].join('\n') };
   });
@@ -91,7 +91,7 @@ test('bot message keeps one hot line, offers highlights and rewrites overlong li
   const story = JSON.parse(f.requests[0].messages[1].content).sections[0].stories[0];
   assert.deepEqual(story, { title: 'AI 做游戏', highlights: ['收了 100 份简历只有 3 份能进面试'], comment: '玩笑' });
   assert.equal(f.requests.length, 2, 'the overlong draft is sent back once');
-  assert.match(f.requests[1].messages.at(-1).content, /版面行超过 50 字/);
+  assert.match(f.requests[1].messages.at(-1).content, /版面行超过 85 字/);
   const message = await readFile(output, 'utf8');
   assert.match(message, /overview\/\n\n🔥 AI 游戏岗百里挑三\n\n【四群】/);
   assert.equal(JSON.parse(await readFile(`${output}.run.json`, 'utf8')).retried, true);

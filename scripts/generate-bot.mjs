@@ -43,7 +43,7 @@ const system = `${await readFile(promptFile || new URL('../prompts/daily-bot.md'
 
 // Long messages get folded in WeChat groups (2026-10-28), so each line and the whole body have hard limits.
 // The model miscounts Chinese characters, so an overlong draft is sent back once with the lines to shorten.
-const LIMITS = { hot: 36, line: 50, total: 460 };
+const LIMITS = { hot: 36, line: 85, total: 700 };
 await rm(output, { force: true });
 await rm(`${output}.response.json`, { force: true });
 const started = Date.now();
