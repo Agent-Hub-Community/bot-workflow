@@ -16,6 +16,22 @@ if (!Number.isFinite(start) || new Date(start * 1000 + 8 * 3600_000).toISOString
 const cutoff = Math.min(Math.floor(Date.now() / 1000), start + 86400);
 if (cutoff <= start) throw new Error('Cannot collect a future date.');
 const nextDate = new Date((start + 86400 + 8 * 3600) * 1000).toISOString().slice(0, 10);
+// wx parses --since/--until in the process time zone, so on a Mac set to another zone the export would start
+// at local midnight and drop part of the Beijing day. TZ pins it to the edition's zone. wx also fails now and then
+// with "找不到 … 的消息记录" while its daemon refreshes the decrypted cache; the same command succeeds on retry.
+function wxHistory(args) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return execFileSync(process.env.WX_BIN || 'wx', args, {
+        env: { ...process.env, HOME: process.env.WX_ACTIVITY_HOME, TZ: 'Asia/Shanghai' },
+        timeout: 60000, maxBuffer: 20 * 1024 * 1024,
+      });
+    } catch (error) {
+      if (attempt >= 4 || !String(error.stderr).includes('找不到')) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 3000 * attempt);
+    }
+  }
+}
 const groups = await collectedChatGroups(date);
 const out = process.env.DAILY_OUTPUT_DIR
   ? path.resolve(process.env.DAILY_OUTPUT_DIR)
@@ -28,10 +44,10 @@ for (const group of selected) {
   let raw = [], exhausted = false;
   let lastFirstId = null;
   for (let offset = 0; offset < 10000; offset += 500) {
-    const stdout = execFileSync(process.env.WX_BIN || 'wx', [
+    const stdout = wxHistory([
       'history', group.username, '--since', date, '--until', nextDate,
       '-n', '500', '--offset', String(offset), '--json',
-    ], { env: { ...process.env, HOME: process.env.WX_ACTIVITY_HOME }, timeout: 60000, maxBuffer: 20 * 1024 * 1024 });
+    ]);
     const batch = JSON.parse(stdout.toString());
     if (!Array.isArray(batch)) throw new Error(`Unexpected history response for ${group.id}`);
     if (batch.length && batch[0]?.local_id !== undefined && batch[0].local_id === lastFirstId) {
