@@ -26,7 +26,8 @@ node "$BOT/scripts/daily.mjs" prepare "$D" [--batch DIR] [--external DIR] [--fro
 - 默认目录是 `$NEWSPAPER/scratch/day-D-runN` 和 `external-D-runN`。N 取两个目录都不存在的最小编号。
 - 每步的输出写到 `批次目录/logs/<步骤名>.log`，终端只显示开始、完成和失败。
 - 开始前检查环境变量：选中的步骤要读库时需要 `WX_ACTIVITY_HOME`，要调模型时需要 `DAILY_LLM_BASE_URL`、`DAILY_LLM_MODEL` 和 `DAILY_LLM_API_KEY`。缺任何一个都不会启动。
-- `collect-batch` 跑完后立即列出各群条数（读 `批次目录/D/group-*.raw.json`）。0 条或没有 raw.json 的群标 `!!`，要核实是当天没人说话还是客户端未同步；发现未同步时，可以在模型写稿前停下脚本。结束时再列一次，并提示检查 `批次目录/activity/avatar-review.json` 的 `pending`：新头像逐张看过、`pending` 清空后才能发布。
+- `collect-batch` 跑完后立即列出各群条数（读 `批次目录/D/group-*.raw.json`）。0 条或没有 raw.json 的群标 `!!`，要核实是当天没人说话还是客户端未同步；发现未同步时，可以在模型写稿前停下脚本。结束时再列一次，并打印收尾命令。
+- `daily.mjs finish D --batch 批次目录 --external 外部资讯目录` 在审稿和外部资讯选题之后一次跑完：落改、校验、外部资讯写稿与锐评、本地预览、导览草稿。已有输出的步骤跳过。
 - 主线某步失败后，主线停下，脚本等 `collect-external` 结束，然后打印续跑命令。续跑命令带 `--batch` 和 `--from-step <失败的步骤>`，从这一步起把主线跑完。
 - `collect-external` 失败不影响主线，只在结束时告警：外部资讯需要按日志补查，或用脚本给出的命令单独重跑 `node "$BOT/scripts/collect-external.mjs" D EXTERNAL`。`collect-external` 拒绝已有快照的目录，所以已写出 `discovery.json` 时，脚本给出新的 `EXTERNAL` 目录。
 - `--from-step` 从列出的最早主线步骤开始跑完主线；只有列出 `collect-external` 时才跑它。续跑必须带 `--batch`，且 `批次目录/D` 必须已经存在，否则脚本在开始前报错。

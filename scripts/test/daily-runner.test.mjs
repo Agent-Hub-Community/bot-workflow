@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { buildPlan, formatCounts, missingEnv, nextRun, prepare, resolveDirs, runPlan, selectSteps }
+import { buildFinishPlan, buildPlan, formatCounts, missingEnv, nextRun, prepare, resolveDirs, runPlan, selectSteps }
   from '../daily.mjs';
 import { load } from '../../lib/newspaper-root.mjs';
 
@@ -89,6 +89,10 @@ test('default directories take the first run number free for both batch and exte
   assert.deepEqual(resolveDirs({ date, scratch, entries: [], batch: '/x/b' }),
     { batch: '/x/b', external: path.join(scratch, `external-${date}-run1`) });
   assert.throws(() => resolveDirs({ date, scratch, entries: [], fromSteps: ['generate'] }), /--batch/);
+  // A resumed day-D-runN batch keeps its own external-D-runN directory.
+  assert.deepEqual(resolveDirs({ date, scratch, entries: [`day-${date}-run1`, `day-${date}-run2`],
+    batch: path.join(scratch, `day-${date}-run2`), fromSteps: ['generate'] }),
+  { batch: path.join(scratch, `day-${date}-run2`), external: path.join(scratch, `external-${date}-run2`) });
 });
 
 test('required environment depends on the selected steps', () => {
@@ -130,7 +134,7 @@ async function fakeRun(scratch, options, behave) {
 const { collectedGroups } = await load('lib/groups.mjs');
 const groups = collectedGroups(date);
 
-// collect-batch writes one raw.json per group, the first one empty; release-activity leaves two avatars pending.
+// collect-batch writes one raw.json per group, the first one empty.
 async function realisticStep(step, batch) {
   if (step.name === 'collect-batch') {
     await mkdir(path.join(batch, date), { recursive: true });
@@ -138,13 +142,9 @@ async function realisticStep(step, batch) {
       await writeFile(path.join(batch, date, `${id}.raw.json`), JSON.stringify(index ? [{}, {}] : []));
     }
   }
-  if (step.name === 'release-activity') {
-    await mkdir(path.join(batch, 'activity'), { recursive: true });
-    await writeFile(path.join(batch, 'activity', 'avatar-review.json'), JSON.stringify({ pending: ['a.png', 'b.png'] }));
-  }
 }
 
-test('prepare shows the group counts right after collect-batch and again at the end with the avatar check', () =>
+test('prepare shows the group counts right after collect-batch and again at the end', () =>
   withScratch(async scratch => {
     const { code, ran, lines, output } = await fakeRun(scratch, {}, realisticStep);
     assert.equal(code, 0);
@@ -156,7 +156,6 @@ test('prepare shows the group counts right after collect-batch and again at the 
     assert.ok(batchDone < countLines[0] && countLines[0] < imagesStart, output);
     assert.match(lines[countLines[0]], new RegExp(`!! ${groups[0].label}.*0 条`));
     assert.ok(countLines[1] > lines.findIndex(line => line.startsWith('[完成] release-activity')));
-    assert.match(output, /!! 2 个新头像待人工查看.*activity\/avatar-review\.json 的 pending/);
     assert.doesNotMatch(output, /collect-external 失败/);
   }));
 
@@ -204,3 +203,20 @@ test('--from-step refuses a batch without the day directory before running anyth
     assert.equal(code, 0);
     assert.deepEqual(ran, mainOrder.slice(2));
   }));
+
+test('finish skips the external drafts that exist and falls back to the commented draft', () => {
+  const base = { date, batch: '/tmp/b', external: '/tmp/e', reports: '/r', bot: '/bot', newspaper: '/np' };
+  const fresh = buildFinishPlan({ ...base, patches: ['/tmp/b/review/group-1.patch.json'], has: file => file === '/tmp/e/selection.json' });
+  assert.deepEqual(names(fresh), ['apply-review', 'finalize-batch', 'generate-external', 'external-comments',
+    'external-final', 'preview', 'bot', 'report']);
+  assert.deepEqual(fresh.find(step => step.name === 'external-final').copy,
+    ['/tmp/e/commented-draft.json', '/tmp/e/reviewed-final.json']);
+  assert.deepEqual(fresh.at(-1).copy, ['/tmp/b/bot-preview.md', `/r/${date}-AgentHub导览草稿.md`]);
+  // An edited reviewed-final.json is kept, and without patches the batch is only validated.
+  const rerun = buildFinishPlan({ ...base, has: () => true });
+  assert.deepEqual(names(rerun), ['finalize-batch', 'preview', 'bot', 'report']);
+  assert.ok(rerun.find(step => step.name === 'preview').args.includes('/tmp/e/reviewed-final.json'));
+  // A day without a selection builds the preview with no external page.
+  const noExternal = buildFinishPlan({ ...base, has: () => false });
+  assert.ok(!noExternal.find(step => step.name === 'preview').args.includes('--external-draft'));
+});

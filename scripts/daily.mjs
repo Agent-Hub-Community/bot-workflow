@@ -1,13 +1,18 @@
 // Prepares one daily edition with a single command: collects chats and images, collects external candidates,
 // drafts and packages the group pages, adds comments/headlines/emphasis, and prepares the activity board.
 //   node "$BOT/scripts/daily.mjs" prepare YYYY-MM-DD [--batch DIR] [--external DIR] [--from-step STEP[,STEP]] [--dry-run]
+//   node "$BOT/scripts/daily.mjs" finish  YYYY-MM-DD --batch DIR --external DIR [--reports DIR] [--dry-run]
+// `finish` runs everything after the editors' review in one go: applies BATCH/review/*.patch.json, validates the
+// batch, drafts and comments the external page from EXTERNAL/selection.json, builds the local preview and writes
+// the group-message draft to REPORTS/<date>-AgentHub导览草稿.md. Steps whose output already exists are skipped, so
+// after fixing a patch or the external page it is enough to delete the stale output and run finish again.
 // The chat steps run one after another; each reads the previous step's output, and running them in sequence also
 // keeps the three WeChat-database steps from overlapping. collect-external reads no database and runs beside them.
 // A collect-external failure only warns, so the chat pages still get prepared. Each step writes its output to
 // BATCH/logs/<step>.log. When a chat step fails the script stops the chat steps and prints the --from-step command
 // that resumes at that step.
 import { createWriteStream, existsSync, realpathSync } from 'node:fs';
-import { mkdir, readdir, readFile } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, readFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -92,9 +97,12 @@ export function nextRun(entries, date) {
 export function resolveDirs({ date, batch, external, fromSteps = [], scratch, entries }) {
   if (fromSteps.length && !batch) throw new Error('--from-step continues an existing batch; pass --batch DIR');
   const run = nextRun(entries, date);
+  // A batch named day-D-runN pairs with external-D-runN beside it, so a resumed run finds its external page.
+  const paired = batch && path.basename(path.resolve(batch)).match(/^day-(\d{4}-\d{2}-\d{2}-run\d+)$/);
   return {
     batch: path.resolve(batch || path.join(scratch, `day-${date}-run${run}`)),
-    external: path.resolve(external || path.join(scratch, `external-${date}-run${run}`)),
+    external: path.resolve(external || (paired ? path.join(path.dirname(path.resolve(batch)), `external-${paired[1]}`)
+      : path.join(scratch, `external-${date}-run${run}`))),
   };
 }
 
@@ -133,25 +141,82 @@ async function groupCounts(date, batch) {
 }
 
 // New leaderboard avatars must be looked at by hand; publishing waits until avatar-review.json has no pending entry.
-async function avatarReview(batch) {
-  const file = path.join(batch, 'activity', 'avatar-review.json');
-  if (!existsSync(file)) return `头像审核：${file} 还没生成，release-activity 跑完后检查其中的 pending。`;
-  const { pending = [] } = JSON.parse(await readFile(file, 'utf8'));
-  return pending.length
-    ? `!! ${pending.length} 个新头像待人工查看：逐张看过后清空 ${file} 的 pending 才能发布。`
-    : `头像审核：${file} 的 pending 为空。`;
+
+// The steps after review. `has(file)` reports whether a file exists; it decides which steps still need to run.
+// The external page is regenerated only when its draft is missing, and reviewed-final.json falls back to the
+// commented draft: the external review only fixes errors, and on most days it changes nothing.
+export function buildFinishPlan({ date, batch, external, reports, patches = [], has, bot = botDir, newspaper = rootDir }) {
+  const scripts = path.join(bot, 'scripts');
+  const draft = path.join(external, 'draft.json'), commented = path.join(external, 'commented-draft.json');
+  const selection = path.join(external, 'selection.json'), final = path.join(external, 'reviewed-final.json');
+  const withExternal = has(selection);
+  const steps = [];
+  if (patches.length) steps.push({ name: 'apply-review', args: [path.join(scripts, 'apply-review.mjs'), batch, ...patches] });
+  steps.push({ name: 'finalize-batch', args: [path.join(scripts, 'finalize-batch.mjs'), batch] });
+  if (withExternal && !has(draft)) {
+    steps.push({ name: 'generate-external', llm: true, args: [path.join(scripts, 'generate-external.mjs'), selection, draft] });
+  }
+  if (withExternal && !has(commented)) {
+    steps.push({ name: 'external-comments', llm: true,
+      args: [path.join(scripts, 'generate-external-comments.mjs'), draft, commented] });
+  }
+  if (withExternal && !has(final)) steps.push({ name: 'external-final', copy: [commented, final] });
+  steps.push({ name: 'preview', args: [path.join(newspaper, 'scripts/prepare-preview.mjs'), '--date', date, '--batch', batch,
+    ...(withExternal ? ['--external-draft', final, '--external-selection', selection] : [])] });
+  const botMd = path.join(batch, 'bot-preview.md');
+  steps.push({ name: 'bot', llm: true,
+    args: [path.join(scripts, 'generate-bot.mjs'), path.join(batch, 'final-reader-issue.json'), date, botMd, '--preview'] });
+  steps.push({ name: 'report', copy: [botMd, path.join(reports, `${date}-AgentHub导览草稿.md`)] });
+  return steps;
+}
+
+export async function finish(options, { env = process.env, run = execute, log = console.log } = {}) {
+  const { date } = options;
+  if (!options.batch || !options.external) throw new Error('finish needs --batch DIR and --external DIR');
+  const batch = path.resolve(options.batch), external = path.resolve(options.external);
+  const reports = path.resolve(options.reports || path.join(rootDir, '..', 'reports'));
+  const reviewDir = path.join(batch, 'review');
+  const patches = existsSync(reviewDir)
+    ? (await readdir(reviewDir)).filter(name => name.endsWith('.patch.json')).sort().map(name => path.join(reviewDir, name)) : [];
+  const steps = buildFinishPlan({ date, batch, external, reports, patches, has: existsSync });
+  log(`收尾（依次）：${steps.map(step => step.name).join(' -> ')}`);
+  if (!patches.length) log('!! review/ 下没有审稿补丁，按模型初稿收尾');
+  const missing = steps.some(step => step.llm)
+    ? ['DAILY_LLM_BASE_URL', 'DAILY_LLM_MODEL', 'DAILY_LLM_API_KEY'].filter(name => !env[name]) : [];
+  if (missing.length) throw new Error(`Set ${missing.join(', ')} before finishing the edition (see the runbook)`);
+  if (options.dryRun) return 0;
+  const logs = path.join(batch, 'logs');
+  await mkdir(logs, { recursive: true, mode: 0o700 });
+  const started = Date.now();
+  for (const step of steps) {
+    const begin = Date.now();
+    try {
+      if (step.copy) {
+        await mkdir(path.dirname(step.copy[1]), { recursive: true });
+        await copyFile(...step.copy);
+      } else await run(step, logs);
+    } catch (error) {
+      log(`[失败] ${step.name}: ${error.message}，日志 ${path.join(logs, `${step.name}.log`)}`);
+      return 1;
+    }
+    log(`[完成] ${step.name} ${Math.round((Date.now() - begin) / 1000)}s`);
+  }
+  log(`用时 ${Math.round((Date.now() - started) / 1000)}s\n本地预览根目录 ${path.join(rootDir, 'dist-preview')}`);
+  log(`导览草稿 ${path.join(reports, `${date}-AgentHub导览草稿.md`)}`);
+  return 0;
 }
 
 function parseArgs(argv) {
   const [command, date, ...rest] = argv;
-  if (command !== 'prepare' || !/^\d{4}-\d{2}-\d{2}$/.test(date || '')) {
-    throw new Error('Usage: daily.mjs prepare YYYY-MM-DD [--batch DIR] [--external DIR] [--from-step STEP[,STEP]] [--dry-run]');
+  if (!['prepare', 'finish'].includes(command) || !/^\d{4}-\d{2}-\d{2}$/.test(date || '')) {
+    throw new Error('Usage: daily.mjs prepare|finish YYYY-MM-DD [--batch DIR] [--external DIR] [--reports DIR]' +
+      ' [--from-step STEP[,STEP]] [--dry-run]');
   }
-  const options = { date, fromSteps: [], dryRun: false };
+  const options = { command, date, fromSteps: [], dryRun: false };
   for (let i = 0; i < rest.length; i += 1) {
     const flag = rest[i];
     if (flag === '--dry-run') options.dryRun = true;
-    else if (['--batch', '--external', '--from-step'].includes(flag) && rest[i + 1] && !rest[i + 1].startsWith('--')) {
+    else if (['--batch', '--external', '--reports', '--from-step'].includes(flag) && rest[i + 1] && !rest[i + 1].startsWith('--')) {
       const value = rest[(i += 1)];
       if (flag === '--from-step') options.fromSteps.push(...value.split(',').filter(Boolean));
       else options[flag.slice(2)] = value;
@@ -221,7 +286,6 @@ export async function prepare(options, {
   log(`用时 ${Math.round((Date.now() - started) / 1000)}s\n`);
 
   if (existsSync(path.join(batch, date))) log(await counts());
-  log(await avatarReview(batch));
   if (result.externalFailed) {
     // collect-external writes its snapshot even when some sources fail, and refuses a directory that holds one.
     const retry = existsSync(path.join(external, 'discovery.json'))
@@ -235,10 +299,14 @@ export async function prepare(options, {
       ` --from-step ${result.resume}`);
     return 1;
   }
-  if (steps.main.length) log(`\n准备完成。下一步按编辑标准审稿，然后跑 finalize-batch.mjs ${batch}`);
+  if (steps.main.length) {
+    log(`\n准备完成。审稿补丁写到 ${path.join(batch, 'review')}/，外部资讯选题写到 ${path.join(external, 'selection.json')}，然后：`);
+    log(`node ${quote(path.join(botDir, 'scripts/daily.mjs'))} finish ${date} --batch ${quote(batch)} --external ${quote(external)}`);
+  }
   return 0;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
-  process.exitCode = await prepare(parseArgs(process.argv.slice(2)));
+  const options = parseArgs(process.argv.slice(2));
+  process.exitCode = await (options.command === 'finish' ? finish(options) : prepare(options));
 }
