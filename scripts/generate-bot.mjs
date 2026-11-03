@@ -103,10 +103,11 @@ if (!checked.errors.length && checked.tooLong.length) {
 await writeFile(`${output}.response.json`, JSON.stringify(result, null, 2), { mode: 0o600 });
 if (checked.errors.length) throw new Error(`Invalid bot message: ${checked.errors.join('; ')}`);
 if (checked.tooLong.length) console.warn(`Bot message still long after one rewrite:\n${checked.tooLong.join('\n')}`);
-const { hot, summaries } = checked;
+const { summaries } = checked;
 const body = [0, 1, 2].map(block => summaries.filter((_, index) => blocks[index] === block))
   .filter(lines => lines.length).map(lines => lines.join('\n')).join('\n\n');
-const message = `${firstLine}\n${overviewUrl}\n\n${hot.length ? `${hot[0]}\n\n` : ''}${body}`;
+// A separate hot line above the sections was dropped (2026-11-03); one the model still writes is discarded.
+const message = `${firstLine}\n${overviewUrl}\n\n${body}`;
 await writeFile(output, `${message}\n`, { mode: 0o600 });
 await writeFile(`${output}.run.json`, JSON.stringify({ model: result.model, elapsedMs: Date.now() - started,
   usage: result.usage, retried, stillLong: checked.tooLong, review: 'pending' }, null, 2), { mode: 0o600 });

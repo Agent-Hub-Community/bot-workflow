@@ -75,7 +75,7 @@ test('bot message covers only pages with stories, links overview once and reject
   await assert.rejects(readFile(output), { code: 'ENOENT' });
 });
 
-test('bot message keeps one hot line, offers highlights and rewrites overlong lines once', async t => {
+test('bot message drops a hot line, offers highlights and rewrites overlong lines once', async t => {
   const issue = { date: '2026-11-02', pages: [{ id: 'group-4', label: '四群', heading: 'h', theme: 't',
     stories: [{ title: 'AI 做游戏', emphasis: ['收了 100 份简历只有 3 份能进面试'], aiComment: '玩笑' }] }] };
   let long = true;
@@ -93,7 +93,8 @@ test('bot message keeps one hot line, offers highlights and rewrites overlong li
   assert.equal(f.requests.length, 2, 'the overlong draft is sent back once');
   assert.match(f.requests[1].messages.at(-1).content, /版面行超过 85 字/);
   const message = await readFile(output, 'utf8');
-  assert.match(message, /overview\/\n\n🔥 AI 游戏岗百里挑三\n\n【四群】/);
+  assert.match(message, /overview\/\n\n【四群】/);
+  assert.doesNotMatch(message, /🔥/);
   assert.equal(JSON.parse(await readFile(`${output}.run.json`, 'utf8')).retried, true);
 });
 
