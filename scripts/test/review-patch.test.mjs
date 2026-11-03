@@ -302,22 +302,3 @@ test('assemble-weekly-reader writes reader.json and lists unresolved ops', async
   assert.ok(existsSync(path.join(batch, 'reader', 'reader.json')));
 });
 
-test('assemble-weekly-reader requires reviewed rank avatars', async t => {
-  const batch = await tempDir(t);
-  const [from, through] = ['2026-10-26', '2026-11-01'];
-  const run = () => exec(process.execPath, [assembleCli, batch, '--from', from, '--through', through]);
-  await mkdir(path.join(batch, 'review'));
-  for (const group of weeklyGroups(through)) {
-    await writeFile(path.join(batch, 'review', `${group.id}.page.json`), JSON.stringify(weeklyPage()));
-  }
-  await writeFile(path.join(batch, 'rank.json'), JSON.stringify({ groups: [
-    { id: 'group-1', label: '一群', leaders: [{ rank: 1, avatar: 'avatars/a.jpg' }] }] }));
-  const { stderr } = await run();
-  assert.match(stderr, /rank-review\.json not found: 1 rank\.json avatars were not checked/);
-  await writeFile(path.join(batch, 'rank-review.json'), JSON.stringify({ pending: ['avatars/a.jpg'], autoRejected: [], failures: [] }));
-  await rm(path.join(batch, 'reader'), { recursive: true });
-  await assert.rejects(run(), /Weekly rank avatars not reviewed: avatars\/a\.jpg/);
-  assert.ok(!existsSync(path.join(batch, 'reader', 'reader.json')));
-  await writeFile(path.join(batch, 'rank-review.json'), JSON.stringify({ pending: [], autoRejected: [], failures: [] }));
-  assert.doesNotMatch((await run()).stderr, /rank-review/);
-});

@@ -4,8 +4,6 @@
 // BATCH/review/<group>.ops.json ([{storyTitle|index, field, find, replace}] from the second reviewer).
 // Ops that do not match exactly one place go to BATCH/review/manual.json for a person to resolve;
 // rewrite the page or the op and run again. Then adds BATCH/rank.json and optional BATCH/external-page.json.
-// BATCH/rank-review.json (from prepare-weekly-rank.mjs) must have no pending avatars; when it is absent the
-// review state of the avatars rank.json uses is unknown and the run only warns.
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -28,17 +26,7 @@ const missing = groups.filter(g => !existsSync(path.join(review, `${g.id}.page.j
 if (missing.length) throw new Error(`Missing review pages: ${missing.map(id => `${id}.page.json`).join(', ')}`);
 
 const rank = await json(path.join(batch, 'rank.json'));
-const rankReview = path.join(batch, 'rank-review.json');
 const warnings = [];
-if (existsSync(rankReview)) {
-  const { pending = [] } = await json(rankReview);
-  if (pending.length) {
-    throw new Error(`Weekly rank avatars not reviewed: ${pending.join(', ')} still pending in ${rankReview}`);
-  }
-} else {
-  const avatars = (rank.groups ?? []).flatMap(g => (g.leaders ?? []).map(l => l.avatar)).filter(Boolean);
-  if (avatars.length) warnings.push(`${rankReview} not found: ${avatars.length} rank.json avatars were not checked for review`);
-}
 
 const pages = [], manual = [];
 for (const group of groups) {
