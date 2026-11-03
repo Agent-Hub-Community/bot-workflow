@@ -6,14 +6,19 @@
 // batch, drafts and comments the external page from EXTERNAL/selection.json, builds the local preview and writes
 // the group-message draft to REPORTS/<date>-AgentHub导览草稿.md. Steps whose output already exists are skipped, so
 // after fixing a patch or the external page it is enough to delete the stale output and run finish again.
+//   node "$BOT/scripts/daily.mjs" publish YYYY-MM-DD --batch DIR --external DIR [--reports DIR] [--dry-run]
+// `publish` releases a finished edition: newspaper's release.mjs, a commit of data/ pushed to main, the deploy
+// run, the read-back check of the live site, and the reviewed group-message draft retitled as published. It needs
+// the newspaper checkout on a clean main and the release environment (config/daily-env.sh).
 // The chat steps run one after another; each reads the previous step's output, and running them in sequence also
 // keeps the three WeChat-database steps from overlapping. collect-external reads no database and runs beside them.
 // A collect-external failure only warns, so the chat pages still get prepared. Each step writes its output to
 // BATCH/logs/<step>.log. When a chat step fails the script stops the chat steps and prints the --from-step command
 // that resumes at that step.
 import { createWriteStream, existsSync, realpathSync } from 'node:fs';
-import { copyFile, mkdir, readdir, readFile } from 'node:fs/promises';
-import { spawn } from 'node:child_process';
+import { copyFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { execFileSync, spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { load, rootDir } from '../lib/newspaper-root.mjs';
@@ -206,10 +211,114 @@ export async function finish(options, { env = process.env, run = execute, log = 
   return 0;
 }
 
+const site = 'https://agent-hub-community.github.io/newspaper/';
+const previewTitle = '日报导览（链接待上线核验）', publishedTitle = '日报已上线';
+
+// The published group message is the reviewed preview draft with its first line retitled, so the text the editor
+// checked is the text that goes out; regenerating it after release would need a second review.
+export function publishedMessage(draft) {
+  const [first, ...rest] = draft.split('\n');
+  if (first.endsWith(publishedTitle)) return draft;
+  if (!first.endsWith(previewTitle)) throw new Error(`Unexpected first line of the group-message draft: ${first}`);
+  return [first.slice(0, -previewTitle.length) + publishedTitle, ...rest].join('\n');
+}
+
+export function commitSubject(date) {
+  const day = new Date(`${date}T00:00:00Z`).toLocaleDateString('en-US', { month: 'long', day: 'numeric', timeZone: 'UTC' });
+  return `Publish ${day} daily with external news and rankings`;
+}
+
+// Runs a command and returns its trimmed stdout; stderr goes to the terminal.
+const output = (command, args, options = {}) => execFileSync(command, args,
+  { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], maxBuffer: 20 * 1024 * 1024, ...options }).trim();
+const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+export async function publish(options, { env = process.env, log = console.log, sh = output, run = execute, wait = pause } = {}) {
+  const { date } = options;
+  if (!options.batch || !options.external) throw new Error('publish needs --batch DIR and --external DIR');
+  const batch = path.resolve(options.batch), external = path.resolve(options.external);
+  const reports = path.resolve(options.reports || path.join(rootDir, '..', 'reports'));
+  const draft = path.join(reports, `${date}-AgentHub导览草稿.md`);
+  const final = path.join(external, 'reviewed-final.json'), selection = path.join(external, 'selection.json');
+  const verify = env.VERIFY_PUBLICATION || path.join(homedir(), '.agents/skills/agenthub-daily/scripts/verify-publication.mjs');
+  const git = args => sh('git', ['-C', rootDir, ...args]);
+  const steps = ['release', 'commit', 'push', 'deploy', 'verify', 'message'];
+  log(`发布（依次）：${steps.join(' -> ')}`);
+
+  for (const file of [path.join(batch, 'issues.json'), draft, verify]) {
+    if (!existsSync(file)) throw new Error(`Missing ${file}; run finish first`);
+  }
+  if (git(['branch', '--show-current']) !== 'main') throw new Error(`${rootDir} is not on main`);
+  if (git(['status', '--porcelain', '--', 'data'])) throw new Error(`${rootDir}/data has uncommitted changes`);
+  if (options.dryRun) return 0;
+  git(['pull', '--ff-only', '--quiet']);
+
+  const logs = path.join(batch, 'logs');
+  await mkdir(logs, { recursive: true, mode: 0o700 });
+  const childEnv = { ...env };
+  delete childEnv.NODE_OPTIONS;
+  const step = async (name, action) => {
+    const begin = Date.now();
+    try {
+      await action();
+    } catch (error) {
+      log(`[失败] ${name}: ${error.message}，日志 ${logs}`);
+      throw error;
+    }
+    log(`[完成] ${name} ${Math.round((Date.now() - begin) / 1000)}s`);
+  };
+  let sha;
+  try {
+    await step('release', () => run({ name: 'release', env: childEnv, args: [path.join(rootDir, 'scripts/release.mjs'),
+      '--daily-batch', batch, ...(existsSync(final) ? ['--external-draft', final, '--external-selection', selection] : []),
+      '--sql-out', path.join(batch, 'feedback-catalog.sql')] }, logs));
+    await step('commit', () => {
+      git(['add', '--', 'data']);
+      git(['commit', '--quiet', '-m', commitSubject(date)]);
+      sha = git(['rev-parse', 'HEAD']);
+    });
+    await step('push', () => git(['push', '--quiet', 'origin', 'main']));
+    await step('deploy', async () => {
+      let id = '';
+      for (let i = 0; i < 24 && !id; i += 1) {
+        id = sh('gh', ['run', 'list', '--commit', sha, '--limit', '1', '--json', 'databaseId', '-q', '.[0].databaseId'],
+          { cwd: rootDir });
+        if (!id) await wait(5000);
+      }
+      if (!id) throw new Error(`no GitHub Actions run appeared for ${sha}`);
+      log(`  Actions run ${id}`);
+      sh('gh', ['run', 'watch', id, '--exit-status'], { cwd: rootDir, stdio: ['ignore', 'ignore', 'inherit'] });
+    });
+    // Pages can serve the previous build for a short while after the deploy job ends.
+    await step('verify', async () => {
+      for (let attempt = 1; ; attempt += 1) {
+        try {
+          sh(process.execPath, [verify, '--newspaper', rootDir, '--site', site, '--date', date,
+            '--out', path.join(batch, 'publication-check.json')], { env: childEnv, stdio: ['ignore', 'ignore', 'inherit'] });
+          return;
+        } catch (error) {
+          if (attempt >= 3) throw error;
+          await wait(30000);
+        }
+      }
+    });
+    await step('message', async () => {
+      const text = publishedMessage(await readFile(draft, 'utf8'));
+      await writeFile(draft, text);
+      await writeFile(path.join(batch, 'published-bot.md'), text);
+    });
+  } catch {
+    return 1;
+  }
+  log(`已上线 ${site}daily/${date}/overview/ ，提交 ${sha.slice(0, 7)}`);
+  log(`上线版导览 ${draft}（没有发群）`);
+  return 0;
+}
+
 function parseArgs(argv) {
   const [command, date, ...rest] = argv;
-  if (!['prepare', 'finish'].includes(command) || !/^\d{4}-\d{2}-\d{2}$/.test(date || '')) {
-    throw new Error('Usage: daily.mjs prepare|finish YYYY-MM-DD [--batch DIR] [--external DIR] [--reports DIR]' +
+  if (!['prepare', 'finish', 'publish'].includes(command) || !/^\d{4}-\d{2}-\d{2}$/.test(date || '')) {
+    throw new Error('Usage: daily.mjs prepare|finish|publish YYYY-MM-DD [--batch DIR] [--external DIR] [--reports DIR]' +
       ' [--from-step STEP[,STEP]] [--dry-run]');
   }
   const options = { command, date, fromSteps: [], dryRun: false };
@@ -232,7 +341,7 @@ function execute(step, logs) {
     const log = createWriteStream(path.join(logs, `${step.name}.log`), { flags: 'a', mode: 0o600 });
     log.write(`\n# ${new Date().toISOString()} node ${step.args.map(quote).join(' ')}\n`);
     // Scripts resolve relative paths and newspaper modules from the newspaper checkout, as in the runbook.
-    const child = spawn(process.execPath, step.args, { cwd: rootDir, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, step.args, { cwd: rootDir, env: step.env || process.env, stdio: ['ignore', 'pipe', 'pipe'] });
     child.stdout.pipe(log, { end: false });
     child.stderr.pipe(log, { end: false });
     child.on('error', error => log.end(() => reject(error)));
@@ -308,5 +417,6 @@ export async function prepare(options, {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   const options = parseArgs(process.argv.slice(2));
-  process.exitCode = await (options.command === 'finish' ? finish(options) : prepare(options));
+  const commands = { prepare, finish, publish };
+  process.exitCode = await commands[options.command](options);
 }

@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { buildFinishPlan, buildPlan, formatCounts, missingEnv, nextRun, prepare, resolveDirs, runPlan, selectSteps }
+import { buildFinishPlan, buildPlan, commitSubject, formatCounts, missingEnv, nextRun, prepare, publish, publishedMessage,
+  resolveDirs, runPlan, selectSteps }
   from '../daily.mjs';
 import { load } from '../../lib/newspaper-root.mjs';
 
@@ -219,4 +220,68 @@ test('finish skips the external drafts that exist and falls back to the commente
   // A day without a selection builds the preview with no external page.
   const noExternal = buildFinishPlan({ ...base, has: () => false });
   assert.ok(!noExternal.find(step => step.name === 'preview').args.includes('--external-draft'));
+});
+
+test('the published message is the reviewed draft retitled, and other first lines are refused', () => {
+  const draft = 'AgentHub 2026.11.03 日报导览（链接待上线核验）\nhttps://x/overview/\n\n【一群】……';
+  assert.equal(publishedMessage(draft), 'AgentHub 2026.11.03 日报已上线\nhttps://x/overview/\n\n【一群】……');
+  assert.equal(publishedMessage(publishedMessage(draft)), publishedMessage(draft));
+  assert.throws(() => publishedMessage('随便一行\n'), /Unexpected first line/);
+  assert.equal(commitSubject('2026-11-03'), 'Publish November 3 daily with external news and rankings');
+});
+
+test('publish releases, commits data/, pushes, waits for the deploy, verifies and retitles the draft', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'publish-'));
+  try {
+    const batch = path.join(dir, 'batch'), external = path.join(dir, 'external'), reports = path.join(dir, 'reports');
+    const verify = path.join(dir, 'verify.mjs');
+    await mkdir(batch); await mkdir(external); await mkdir(reports);
+    await writeFile(path.join(batch, 'issues.json'), '[]');
+    await writeFile(path.join(external, 'reviewed-final.json'), '{}');
+    await writeFile(verify, '');
+    const draft = path.join(reports, `${date}-AgentHub导览草稿.md`);
+    await writeFile(draft, 'AgentHub 2026.11.01 日报导览（链接待上线核验）\nlink\n');
+    const calls = [];
+    let verifyTries = 0;
+    const sh = (command, args) => {
+      calls.push([command, ...args].join(' '));
+      const joined = args.join(' ');
+      if (joined.includes('branch --show-current')) return 'main';
+      if (joined.includes('rev-parse HEAD')) return 'abc1234def';
+      if (command === 'gh' && args[1] === 'list') return '42';
+      if (args[0] === verify && (verifyTries += 1) === 1) throw new Error('stale CDN');
+      return '';
+    };
+    const ran = [];
+    const run = async step => { ran.push(step); };
+    const code = await publish({ date, batch, external, reports },
+      { env: { NODE_OPTIONS: '--import=x', VERIFY_PUBLICATION: verify }, log: () => {}, sh, run, wait: async () => {} });
+    assert.equal(code, 0);
+    assert.equal(ran.length, 1);
+    assert.ok(ran[0].args.includes('--external-draft') && !('NODE_OPTIONS' in ran[0].env));
+    const order = ['add -- data', 'commit --quiet', 'push --quiet origin main', 'run list --commit abc1234def', 'run watch 42'];
+    const at = order.map(part => calls.findIndex(call => call.includes(part)));
+    assert.ok(at.every((index, i) => index >= 0 && (i === 0 || index > at[i - 1])), calls.join('\n'));
+    assert.equal(verifyTries, 2);
+    assert.match(await readFile(draft, 'utf8'), /^AgentHub 2026\.11\.01 日报已上线\n/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('publish refuses a newspaper checkout that is not on main before releasing anything', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'publish-'));
+  try {
+    for (const sub of ['b', 'e', 'r']) await mkdir(path.join(dir, sub));
+    await writeFile(path.join(dir, 'b', 'issues.json'), '[]');
+    await writeFile(path.join(dir, 'r', `${date}-AgentHub导览草稿.md`), '');
+    await writeFile(path.join(dir, 'v.mjs'), '');
+    const ran = [];
+    await assert.rejects(publish({ date, batch: path.join(dir, 'b'), external: path.join(dir, 'e'), reports: path.join(dir, 'r') },
+      { env: { VERIFY_PUBLICATION: path.join(dir, 'v.mjs') }, log: () => {}, sh: () => 'daily-speedup',
+        run: async step => { ran.push(step); } }), /not on main/);
+    assert.equal(ran.length, 0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
