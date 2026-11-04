@@ -229,8 +229,9 @@ export function commitSubject(date) {
 }
 
 // Runs a command and returns its trimmed stdout; stderr goes to the terminal.
-const output = (command, args, options = {}) => execFileSync(command, args,
-  { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], maxBuffer: 20 * 1024 * 1024, ...options }).trim();
+// A call that ignores stdout (gh run watch) gets null back, which is returned as ''.
+export const output = (command, args, options = {}) => (execFileSync(command, args,
+  { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], maxBuffer: 20 * 1024 * 1024, ...options }) ?? '').trim();
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 export async function publish(options, { env = process.env, log = console.log, sh = output, run = execute, wait = pause } = {}) {

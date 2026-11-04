@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { buildFinishPlan, buildPlan, commitSubject, formatCounts, missingEnv, nextRun, prepare, publish, publishedMessage,
+import { buildFinishPlan, buildPlan, commitSubject, output, formatCounts, missingEnv, nextRun, prepare, publish, publishedMessage,
   resolveDirs, runPlan, selectSteps }
   from '../daily.mjs';
 import { load } from '../../lib/newspaper-root.mjs';
@@ -284,4 +284,9 @@ test('publish refuses a newspaper checkout that is not on main before releasing 
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test('output returns an empty string when the command ignores stdout', () => {
+  assert.equal(output(process.execPath, ['-e', 'console.log(1)'], { stdio: ['ignore', 'ignore', 'inherit'] }), '');
+  assert.equal(output(process.execPath, ['-e', 'console.log(" 2 ")']), '2');
 });
