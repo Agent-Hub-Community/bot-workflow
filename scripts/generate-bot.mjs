@@ -29,9 +29,36 @@ const overviewUrl = `${site}/daily/${date}/overview/`;
 // Pages without stories are left out of the message rather than announced as empty (2026-10-19).
 // Each story also brings its reviewed emphasis spans and AI comment: short, already fact-checked lines that
 // give the message a concrete hook (a number, a quote, a dispute) without handing over the full text.
+const linkKey = url => {
+  try {
+    const u = new URL(url);
+    const arxiv = u.hostname.endsWith('arxiv.org') && u.pathname.match(/\/(?:abs|pdf|html)\/(\d{4}\.\d{4,5})/);
+    if (arxiv) return `arxiv:${arxiv[1]}`;
+    const hf = u.hostname === 'huggingface.co' && u.pathname.match(/^\/papers\/(\d{4}\.\d{4,5})/);
+    if (hf) return `arxiv:${hf[1]}`;
+    return `${u.hostname.replace(/^www\./, '')}${u.pathname.replace(/\/+$/, '').toLowerCase()}`;
+  } catch { return null; }
+};
+const owners = new Map();
+for (const page of issue.pages) for (const story of page.stories || []) {
+  for (const key of new Set((story.resources || []).map(r => linkKey(r.url)).filter(Boolean))) {
+    if (!owners.has(key)) owners.set(key, new Set());
+    owners.get(key).add(page.label);
+  }
+}
+function alsoIn(story, page) {
+  const others = new Set();
+  for (const r of story.resources || []) for (const label of owners.get(linkKey(r.url)) || []) if (label !== page.label) others.add(label);
+  return others.size ? { alsoIn: [...others] } : {};
+}
+
+// The same paper or project is often shared in several groups the same day (2026-11-04: one CUA paper in four
+// groups). Stories whose resources share a link with a story in another page carry `alsoIn`, so the message can
+// name that work once and give the other lines to each group's own topics.
 const sections = issue.pages.filter(page => page.stories?.length).map(page => ({
   label: page.label, heading: page.heading, theme: page.theme,
-  stories: page.stories.map(story => ({ title: story.title, highlights: story.emphasis || [], comment: story.aiComment || story.review || '' })),
+  stories: page.stories.map(story => ({ title: story.title, highlights: story.emphasis || [],
+    comment: story.aiComment || story.review || '', ...alsoIn(story, page) })),
 }));
 if (!sections.length) throw new Error(`No page with stories for ${date}`);
 // The layout is fixed in code: main groups, topic groups (group-6 and later) and external news form
