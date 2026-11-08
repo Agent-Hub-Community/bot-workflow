@@ -19,6 +19,10 @@ const nextDate = new Date((start + 86400 + 8 * 3600) * 1000).toISOString().slice
 // wx parses --since/--until in the process time zone, so on a Mac set to another zone the export would start
 // at local midnight and drop part of the Beijing day. TZ pins it to the edition's zone. wx also fails now and then
 // with "找不到 … 的消息记录" while its daemon refreshes the decrypted cache; the same command succeeds on retry.
+export function beijingTime(seconds) {
+  return new Date((seconds + 8 * 3600) * 1000).toISOString().slice(0, 16).replace('T', ' ');
+}
+
 function wxHistory(args) {
   for (let attempt = 1; ; attempt += 1) {
     try {
@@ -58,7 +62,10 @@ for (const group of selected) {
     if (batch.length < 500) { exhausted = true; break; }
   }
   if (!exhausted) throw new Error(`History limit reached for ${group.id}; do not summarize partial export.`);
-  raw = raw.filter(m => m.timestamp >= start && m.timestamp < cutoff).sort((a, b) => a.timestamp - b.timestamp || a.local_id - b.local_id);
+  // wx's `time` text follows its daemon's time zone (PST on this Mac since the macOS 27 update), so it is
+  // rebuilt from the timestamp in the edition's zone.
+  raw = raw.filter(m => m.timestamp >= start && m.timestamp < cutoff).sort((a, b) => a.timestamp - b.timestamp || a.local_id - b.local_id)
+    .map(m => ({ ...m, time: beijingTime(m.timestamp) }));
   await writeFile(path.join(out, `${group.id}.raw.json`), JSON.stringify(raw, null, 2), { mode: 0o600 });
   const senders = new Map();
   const messages = raw.map((m, i) => {
