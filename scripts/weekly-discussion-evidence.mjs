@@ -66,7 +66,9 @@ for (const group of wanted) {
     const all = days.flatMap(d => byDate[d]);
     // Days with very many messages are read in windows so each request stays a manageable size.
     const windows = [];
-    for (let w = 0; w < all.length; w += 1200) windows.push(all.slice(w, w + 1200));
+    // 1200-message windows produced answers the gateway cut mid-stream (2026-11-09, three-group week); 500 holds.
+    const size = Number(process.env.EVIDENCE_WINDOW) || 500;
+    for (let w = 0; w < all.length; w += size) windows.push(all.slice(w, w + size));
     const answer = [];
     for (const messages of windows) {
       const prompt = `话题：${JSON.stringify(batch)}\n原始消息（${days.join('、')}，本段 ${messages.length} 条）：${JSON.stringify(messages)}`;
