@@ -99,6 +99,9 @@ node "$BOT/scripts/generate-weekly-bot.mjs" "data/weekly-editions/FROM_THROUGH.j
   --split-dir "$REPORTS/FROM_THROUGH-bot"
 ```
 
+周报导览和日报导览写法相同：每个版面一行，带具体钩子，每行 85 字、全文 700 字以内。脚本会调模型，超长时最多让模型重写两次，仍然超长就给出提示，由人删减。发群前对照周报原文核对数字和引语。
+
+
 ## 7. 同步更新资料库、机会与黑话
 
 每次做周报时，顺手把资料库（`data/library.json`）、机会（`data/opportunities.json`）和群聊黑话（`data/glossary.json`）从上次各自的 `through` 次日补到本周日：

@@ -95,7 +95,30 @@ test('bot message drops a hot line, offers highlights and rewrites overlong line
   const message = await readFile(output, 'utf8');
   assert.match(message, /overview\/\n\n【四群】/);
   assert.doesNotMatch(message, /🔥/);
-  assert.equal(JSON.parse(await readFile(`${output}.run.json`, 'utf8')).retried, true);
+  assert.equal(JSON.parse(await readFile(`${output}.run.json`, 'utf8')).retried, 1);
+});
+
+test('weekly message uses the daily prompt plus weekly notes and links the weekly overview', async t => {
+  const story = title => ({ title, text: 't', emphasis: [], review: 'r' });
+  const issue = { id: '2026-11-02_2026-11-08', from: '2026-11-02', through: '2026-11-08', label: '2026.11.02–11.08 周报',
+    pages: [{ id: 'group-1', label: '一群', title: 'h', intro: 'i', stories: [story('A')] },
+      { id: 'group-6', label: 'AI Safety', title: 'h', intro: 'i', stories: [story('B')] },
+      { id: 'external', label: '外部资讯', title: 'h', intro: 'i', stories: [story('C')] }] };
+  const f = await setup(t, request => {
+    const { firstLine, overviewUrl, sections } = JSON.parse(request.messages[1].content);
+    return { content: [firstLine, overviewUrl, '', ...sections.map(s => `【${s.label}】${s.label} 看点`)].join('\n') };
+  });
+  const data = path.join(f.dir, 'weekly.json'), output = path.join(f.dir, 'weekly.md'), split = path.join(f.dir, 'split');
+  await writeFile(data, JSON.stringify(issue));
+  await f.run('generate-weekly-bot.mjs', [data, output, '--base-url', site, '--split-dir', split]);
+  const request = f.requests[0];
+  assert.match(request.messages[0].content, /本期是一周的周报/);
+  const input = JSON.parse(request.messages[1].content);
+  assert.equal(input.firstLine, 'AgentHub 2026.11.02–11.08 周报已上线');
+  assert.match(input.overviewUrl, /\/weekly\/2026-11-02\/2026-11-08\/overview\/$/);
+  const message = await readFile(output, 'utf8');
+  assert.match(message, /\n\n【一群】一群 看点\n\n【AI Safety】AI Safety 看点\n\n【外部资讯】外部资讯 看点\n$/);
+  assert.equal(await readFile(path.join(split, '2026-11-02_2026-11-08-bot.md'), 'utf8'), message);
 });
 
 test('bot message keeps main groups together and separates topic groups and external news', async t => {

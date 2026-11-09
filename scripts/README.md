@@ -91,7 +91,7 @@ node "$BOT/scripts/weekly-select-discussion.mjs" "$BATCH/reader/reader.json" "$B
 ## 4. 导览文案与通用模型调用
 
 - `generate-bot.mjs DATA_JSON YYYY-MM-DD OUTPUT_MD [--notes FILE] [--site URL] [--preview]`：用 `prompts/daily-bot.md` 生成发到群里的日报合并导览。
-- `generate-weekly-bot.mjs ISSUE_JSON OUTPUT_MD [--base-url URL] [--split-dir DIR]`：按周报数据直接拼出周报导览文案（不调模型）。
+- `generate-weekly-bot.mjs ISSUE_JSON OUTPUT_MD [--base-url URL] [--split-dir DIR] [--notes FILE]`：写周报的群导览文案，写法和日报导览相同（`prompts/daily-bot.md` 加 `prompts/weekly-bot.md`），共用 `lib/bot-message.mjs` 的格式与长度检查；需要 `DAILY_LLM_*` 环境变量。不带 `--base-url` 时首行标成“链接待上线核验”。
 - `call-llm.mjs PROMPT_FILE OUTPUT [--system FILE] [--reasoning low|medium|high] [--max-tokens N]`：把任意 prompt 文件发给 `lib/llm.mjs` 配置的模型，周报分片或单条返工时常用。
 
 ## 测试
