@@ -302,3 +302,26 @@ test('assemble-weekly-reader writes reader.json and lists unresolved ops', async
   assert.ok(existsSync(path.join(batch, 'reader', 'reader.json')));
 });
 
+
+test('a topical page whose last story is removed is left out, a main page stays', () => {
+  const story = title => ({ category: 'c', title, text: `${title} 正文`, emphasis: [], aiComment: 'a' });
+  const issues = [{ id: '2026-11-09', date: '2026-11-09', label: 'x', pages: [
+    { id: 'group-1', label: '一群', stories: [story('一')] },
+    { id: 'group-7', label: 'Robot', stories: [story('七')] },
+    { id: 'group-8', label: 'AI4S', stories: [story('八')] },
+  ] }];
+  const { issues: [issue], warnings } = applyDailyPatch(issues, { pages: {
+    'group-1': { stories: [{ index: 0, remove: true }] },
+    'group-7': { stories: [{ index: 0, remove: true }] },
+  } }, { batchDir: tmpdir() });
+  assert.deepEqual(issue.pages.map(page => [page.id, page.stories.length]), [['group-1', 0], ['group-8', 1]]);
+  assert.ok(warnings.some(w => /group-7: every story removed/.test(w)));
+});
+
+test('daily resources with a query string are rejected when the patch is applied', () => {
+  const issues = [{ id: '2026-11-09', date: '2026-11-09', label: 'x', pages: [
+    { id: 'group-1', label: '一群', stories: [{ category: 'c', title: 't', text: '正文', emphasis: [], aiComment: 'a' }] }] }];
+  assert.throws(() => applyDailyPatch(issues, { pages: { 'group-1': { stories: [{ index: 0,
+    resources: [{ kind: 'article', label: 'x', url: 'https://mp.weixin.qq.com/s?__biz=abc&mid=1' }] }] } } },
+  { batchDir: tmpdir() }), /must not carry a query string/);
+});
