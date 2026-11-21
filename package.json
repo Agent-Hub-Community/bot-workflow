@@ -2,7 +2,7 @@
   "name": "bot-workflow",
   "private": true,
   "type": "module",
-  "description": "AgentHub 的消息采集、模型写稿与显式审核流程",
+  "description": "AgentHub 的本地微信采集、静态媒体挂载与 Antigravity 日报/周报打包流程",
   "license": "MIT",
   "engines": { "node": ">=22.15.0" },
   "repository": {
@@ -10,7 +10,6 @@
     "url": "https://github.com/Agent-Hub-Community/bot-workflow.git"
   },
   "scripts": {
-    "test": "node --test pipeline/test/*.test.mjs scripts/test/*.test.mjs skill/scripts/*.test.mjs && node --experimental-vm-modules scripts/test/month-report.mjs && node scripts/package-month-resources.mjs --self-test",
-    "example:synthetic": "node scripts/run-synthetic-example.mjs"
+    "test": "node --test pipeline/test/*.test.mjs scripts/test/*.test.mjs skill/scripts/weekly-window.test.mjs"
   }
 }

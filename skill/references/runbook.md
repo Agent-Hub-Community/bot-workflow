@@ -1,126 +1,89 @@
-# 操作手册
+# 操作手册（Antigravity 原生版）
 
-变量定义见 [SKILL.md](../SKILL.md#路径与环境变量)。下文里 `D` 是刊期日期（`YYYY-MM-DD`），`$BATCH` 是单日批次目录（如 `$NEWSPAPER/scratch/day-D-run1`），`$EXTERNAL` 是外部资讯目录。所有命令默认在 `$NEWSPAPER` 目录下运行：`node scripts/…` 调用 `newspaper` 的脚本，`node "$BOT/scripts/…"` 调用 `bot-workflow` 的脚本。
-
-## 1. 环境与模型配置
-
-- 两个仓库放在同一个父目录下；如果不在一起，设好 `NEWSPAPER_DIR`。Node.js 最低 22.15，推荐 24。
-- 群列表只以 `$NEWSPAPER/lib/groups.mjs` 为准：`collectedGroups(D)` 是当天要采集并计入社区榜的群，`pageGroups(D)` 是当天固定出读者版面的主群，`optionalPageGroups(D)` 是有实质内容时才纳入日报的垂类专项群。对应的微信群号配在 `$PIPELINE/groups.private.mjs` 里。
-- 生成脚本都从 `$BOT/lib/llm.mjs` 读配置：`DAILY_LLM_BASE_URL`（脚本在末尾拼 `/chat/completions`）、`DAILY_LLM_MODEL`（默认 `gemini-4-argon`）、`DAILY_LLM_API_KEY`。单次调用模型用 `node "$BOT/scripts/call-llm.mjs" PROMPT OUTPUT [--system FILE] [--reasoning high] [--max-tokens N]`。
-- 写群稿时开 `reasoning_effort: high`，大群一次约 4 到 5 分钟；外部资讯和周报不开推理。
-- 跑 `bot-workflow` 的 `npm test` 时，不要带本机为长请求加的 `NODE_OPTIONS` 加载器：它会接管模型请求，测试里的假模型接口就失效了。
-
-## 2. 准备：一条命令
+先加载环境变量：
 
 ```sh
-node "$BOT/scripts/daily.mjs" prepare "$D"
+source /Users/haoqing/Documents/Github/summary_bot/config/daily-env.sh
+cd "$NEWSPAPER"
 ```
 
-这条命令按下面的顺序编排，每步日志写在 `$BATCH/logs/`：
+所有写稿、读图、外部资讯和导览均由 Antigravity（Gemini）及其并行子任务完成，不再配置任何 `DAILY_LLM_*` 或外部代理。
 
-| 顺序 | 步骤 | 读微信库 |
+- **T3 Code 环境优先使用 `delegate_task`**（先调一次 `orchestrator_capabilities`，再以 `mode: "async"`、`target: { providerInstanceId: "antigravity", model: "gemini-4-neon", options: { thought_level: "low" } }` 并行派发；大群多图时提示分批读图、每次 6–8 张，避免单步思考过长触发上游超时）。这样即使对话开在其他仓库工作区，子任务也能继承 `full-access` 权限直接读写 `$NEWSPAPER/scratch` 与 `$BOT`，不会像原生 `invoke_subagent` 那样因跨工作区权限拦截无法透传到 UI 而卡死。
+- **非 T3 环境且工作区在 `summary_bot` 时**，使用原生 `invoke_subagent`（`TypeName: "self"`）。
+
+## 1. 采集（1 条命令）
+
+```sh
+node "$BOT/scripts/daily.mjs" collect "$D"
+```
+
+编排如下（日志在 `$BATCH/logs/`）：
+
+| 顺序 | 步骤 | 说明 |
 |---|---|---|
-| 1 | `collect-batch` 导出整日消息 | 是 |
-| 2 | `collect-images` 解图并写图片描述 | 是 |
-| 并行 | `collect-external` 外部资讯基础候选 | 否 |
-| 3 | `prepare-week-d generate/package --emphasis` + `enrich-month-d` 写初稿、报头、锐评、重点 | 否 |
-| 4 | `prepare-release-activity` 活跃榜 | 是 |
+| 1 | `collect-batch` | 导出北京时间整日消息（`raw.json`、`input.json`） |
+| 2 | `collect-images` | 纯本地解码 `.dat` / 提取视频与 ≤10 MB 文件，自动转 WebP（写宽高）与 faststart MP4 到 `$BATCH/$D/media/<group>/` |
+| 3 | `release-activity` | 计算日榜与周/月/总榜，自动剔除占位头像 |
+| 并行 | `collect-external` | 抓 AIHOT / HF / alphaXiv / HN / X 基础候选 |
 
-- 读库的三步串行执行，同一个微信账号的数据库不能并发读取。
-- 群聊主线某一步失败时命令停止，并提示从哪一步续跑（`--from-step`）；续跑写稿时只重跑没通过的群。外部资讯抓取失败只告警，不停主线，结束时给出单独重跑的命令。`--dry-run` 只打印计划。
-- 采集一完成就打印各群条数，结束时再汇总一次，并提示还有几张新头像待看。某群 0 条时，比对本地消息编号和会话列表的最后时间：如果都停在前一天，可以按“本地无记录”处理；如果怀疑是同步缺口，请用户在微信里滚动到该日后重采。
+- 读微信库的三步自动串行；`collect-external` 失败只告警不停主线。
+- **采集窗口规则**：当 `$D` 是北京时间昨天（最新一期）时，默认自动启用 `--through-now`，微信聊天与外部资讯均覆盖 **`$D` 00:00 起至生成时刻**（昨天完整一天 + 今天 00:00 到生成当下）；补跑更早日期时默认严格按 `$D` 00:00–24:00（可加 `--through-now` 或 `--strict-day` 显式覆盖）。次日新刊写稿时若前一期已带出当日凌晨旧闻，自然跳过不重复报道。
+- 某步失败时用 `--batch "$BATCH" --from-step <step>` 续跑。
+- 跑完会打印各群条数与已解图张数。某群 0 条时，可快速确认是当天没人说话还是微信客户端未同步。
 
-## 3. 审稿与落改
+## 2. 并行派发子任务出稿
 
-### 3.1 群稿
+在 T3 Code 环境下先调用一次 `orchestrator_capabilities`，然后在一个 turn 里并行调用 `delegate_task`（`mode: "async"`、`target: { providerInstanceId: "antigravity", model: "gemini-4-neon" }`；非 T3 环境且在 `summary_bot` 工作区时改用 `invoke_subagent` `TypeName: "self"`）：
 
-每个有稿的群交给一个编辑（人或 agent）。编辑对照 `$BATCH/D/<group>.input.json` 和同序的 `raw.json`，只查[编辑标准](editorial-standards.md)列出的六类硬伤，并看有没有漏掉的实质话题。编辑不写错误清单，直接写审稿补丁：
+### 群稿子任务（活跃群各 1 个；消息极少的群/专项群可合并为 1 个）
 
-```json
-{ "pages": { "group-4": {
-  "heading": "可选，新报头",
-  "stories": [
-    { "index": 0, "text": "改好的完整正文", "emphasis": ["正文里逐字出现的片段"],
-      "discussion": { "first": "m0094", "last": "m0189", "drop": ["m0138"] },
-      "resources": [{ "kind": "paper", "label": "论文名", "url": "https://..." }] },
-    { "index": 1, "replace": [{ "field": "text", "find": "原文片段", "replace": "新片段" }],
-      "discussion": { "first": "m0066", "last": "m0091", "drop": [] } },
-    { "new": true, "category": "…", "title": "…", "text": "…", "emphasis": [], "aiComment": "…",
-      "discussion": { "first": "m0190", "last": "m0238", "drop": [] }, "resources": [] }
-  ] } } }
-```
+给每个群子任务的任务清单：
+- 读 `$BOT/prompts/daily-group.md`（写作规则 + JSON Schema）与 `$BOT/prompts/daily-comment.md`
+- 读 `$BATCH/$D/<group>.input.json`（必要时对照 `<group>.raw.json`）
+- 对消息里存在 `image.file` 的图片，直接 `read_file` 打开 `$BATCH/$D/<image.file>` 看图
+- 一次性写入 `$BATCH/$D/<group>.draft.json`（含 `heading`、`theme`、`stories`（每条含 `category`、`title`、`text`、`emphasis`、`aiComment`、`evidence_ids`、`discussion_range`、`resources`）和可选 `image_alts`）
+- 垂类专项群（`group-6` AI Safety、`group-7` Robot、`group-8` AI4S）若当天无实质讨论，写 `{"heading":"","theme":"","stories":[]}` 即可，打包时会自动省略空版
+- 写完用 `node` 校验 JSON 合法且必填字段齐全；提示子任务不要再启动子 agent
 
-```sh
-node "$BOT/scripts/apply-review.mjs" "$BATCH" "$BATCH"/review/group-*.patch.json
-node "$BOT/scripts/finalize-batch.mjs" "$BATCH"
-```
+### 外部资讯子任务（与群稿同时并行）
 
-- 每群一份补丁，一次全部传入；两份补丁改同一条稿子会报冲突。`index` 指初稿里的下标。
-- 第一次运行时，脚本把初稿备份为 `issues.pre-review.json`；以后每次都从这份备份重新打补丁，所以改完补丁直接重跑即可，改动不会叠加。
-- 如果在落改之后又重新生成了 `issues.json`，脚本会报错，不会覆盖新稿。确认后加 `--rebase`，以当前稿为新基线。
+- 读 `$EXTERNAL/discovery.json`、`$BOT/skill/references/external-sources.md`、`$BOT/prompts/external-editor.md` 和 `$BOT/prompts/daily-comment.md`
+- 按“先扫、再挑、只核实入选的”补查重点来源并核实入选条目的一手原文（严格对齐目标日期的北京时间 24 小时窗口，补跑多天时避免跨日重复）
+- 写出 `$EXTERNAL/selection.json` 和 `$EXTERNAL/reviewed-final.json`（每条包含 `emphasis` 和 `aiComment`，`links[].url` 逐字来自 `selection.json`）
+- 写完用 `node` 校验 JSON 合法与链接一致性
 
-- `apply-review.mjs` 按消息区间截取讨论节选：发言人编成“群友 N”，原始正文和正文里的 `@昵称` 原样保留，引用头换成编号，图片只留 `[图片]`，短复读最多留两次。
-- `replace` 的 `find` 必须在字段里唯一出现。改完正文后，对不上的重点片段会被自动丢掉，并打印出来。
-- 资料链接只收群里出现过、并且亲自打开核实过的公开链接。
-- 日报不再另设逐条复核人。编辑没把握的地方，回到原文再查一次，不要靠第二个人兜底。
-
-### 3.2 头像
-
-`prepare-release-activity` 会自动剔除“暂时无法查看”占位图（哈希表在 `$NEWSPAPER/lib/avatar-placeholders.mjs`），名次保留但不显示头像。剩下的新头像拼成一张图，一次看完：
+## 3. 打包、自动挂载媒体与本地预览
 
 ```sh
-cd "$BATCH/activity" && node -e 'console.log(require("./avatar-review.json").pending.join("\n"))' > /tmp/av.txt \
-  && montage @/tmp/av.txt -tile 6x -geometry 160x160+6+6 /tmp/avatars.png
+node "$BOT/scripts/daily.mjs" finish "$D" --batch "$BATCH" --external "$EXTERNAL"
 ```
 
-只排除未成年人照片和不当图片。看完后清空 `pending`。遇到新的占位图样式，把它的 MD5 加进哈希表。
+这条命令依次执行：
+1. `package-daily.mjs`：把各群 `draft.json` 打包为 `$BATCH/issues.json`，自动裁剪不合规范的 `emphasis`，按 `discussion_range`（或 `evidence_ids` 首尾）截出匿名讨论记录，仅把**入选讨论**里的图片（含宽高）/视频/≤10 MB 文件按内容 MD5 去重复制到 `$BATCH/attachments/`，最后写出 `$BATCH/bot-input.json`。
+2. `fetch-link-previews.mjs --batch "$BATCH"`：增量抓取本期讨论新增裸链的 OpenGraph/oEmbed 预览到 `newspaper/data/link-previews.json`（网络失败只告警不阻断）。
+3. `newspaper/scripts/prepare-preview.mjs`：带着 `--attachment-dir "$BATCH"` 构建本地预览到 `$BATCH/preview/`。
 
-## 4. 外部资讯
+## 4. 写发群导览草稿
 
-先看[资讯补查](external-sources.md)。
+主 agent 读 `$BATCH/bot-input.json` 和 `$BOT/prompts/daily-bot.md`，直接写出 `$REPORTS/$D-AgentHub导览草稿.md`，再跑一次格式与字数校准：
 
 ```sh
-# daily.mjs prepare 已跑过 collect-external；补扫其他来源，先挑出要用的条目，只核实入选条目
-node "$BOT/scripts/generate-external.mjs" "$EXTERNAL/selection.json" "$EXTERNAL/draft.json"
-node "$BOT/scripts/generate-external-comments.mjs" "$EXTERNAL/draft.json" "$EXTERNAL/commented-draft.json"
+node "$BOT/scripts/check-bot.mjs" "$BATCH/bot-input.json" "$REPORTS/$D-AgentHub导览草稿.md" --fix
 ```
 
-审稿只改错（繁体字、数字、来源对不上）。终稿存为 `$EXTERNAL/reviewed-final.json`。
+只做本地预览时到这里即可交付（附预览路径与导览草稿路径）。
 
-## 5. 本地预览与导览草稿
+## 5. 发布上线（获准后）
 
 ```sh
-node scripts/prepare-preview.mjs --date "$D" --batch "$BATCH" \
-  --external-draft "$EXTERNAL/reviewed-final.json" --external-selection "$EXTERNAL/selection.json"
-node "$BOT/scripts/generate-bot.mjs" "$BATCH/final-reader-issue.json" "$D" "$BATCH/bot-preview.md" --preview
+node "$BOT/scripts/daily.mjs" publish "$D" --batch "$BATCH" --external "$EXTERNAL"
 ```
 
-以 `$BATCH/preview` 为根目录起本地静态服务，在 375px 和 1440px 下抽检当天版面、重点下划线、讨论弹窗和榜单。只做预览时，把 `bot-preview.md` 拷到 `$REPORTS/D-AgentHub导览草稿.md` 交付。
+依次执行：`newspaper/scripts/release.mjs`（日报 + 附件 + 头像 + 外部资讯入库、单次公开构建、可选语义向量与 D1 `stories` ID 登记以支持 `discussion_opens` 统计；已移除点赞/点踩）→ 增量 `fetch-link-previews.mjs` → `git commit` → `git push origin main` → `gh run watch` 等待 GitHub Actions 构建部署完成 → 把导览草稿首行改成 `日报已上线`。
 
-## 6. 发布（获准后）
-
-```sh
-node scripts/release.mjs --daily-batch "$BATCH" \
-  --external-draft "$EXTERNAL/reviewed-final.json" --external-selection "$EXTERNAL/selection.json" \
-  --sql-out "$BATCH/feedback-catalog.sql"
-```
-
-`release.mjs` 依次完成：日报与榜单入库、外部资讯入库、公开构建、语义向量、再次公开构建、`npm test`、`test/build.mjs --public`、生成反馈目录 SQL、在 D1 执行。D1 只接受全为 `INSERT OR IGNORE` 的 SQL，已有票数不变。任何一步失败都会停止，并打印失败的是哪一步。它不提交、不推送；最后打印改动目录汇总。
-
-然后：
-
-1. 核对 `git status`：只应改动 `data/`。头像换了公开编号时，git 会显示删除加新增，这是正常的；脚本已校验历史日榜不变。
-2. 提交并推送到 `main`，等 GitHub Actions 部署成功。
-3. 生成上线版导览：
-
-```sh
-node "$SKILL_DIR/scripts/verify-publication.mjs" \
-  --newspaper "$NEWSPAPER" --site "$SITE" --date "$D" --out "$BATCH/publication-check.json"
-node "$BOT/scripts/generate-bot.mjs" "$BATCH/publication-check.json.data.json" "$D" "$BATCH/published-bot.md"
-```
-
-把 `published-bot.md` 拷到 `$REPORTS/D-AgentHub导览草稿.md` 交给用户，注明导览没有发群，并说明资料库和黑话词典距离上次更新隔了几天。
+如需要额外线上回读核验，可加 `--verify` 触发 `verify-publication.mjs`。
 
 ### 修旧刊期
 
-只改往期某篇文案时，直接改 `data/editions/<date>.json`（或重新跑 `import-external-report.mjs`）。不要动 `data/public-activity/`，不要调用 `publish-reviewed-batch.mjs`，否则社区榜的截止日会倒退回旧日期。
+直接编辑 `$NEWSPAPER/data/editions/<date>.json` 或重新导入外部资讯，不动 `data/public-activity/`。

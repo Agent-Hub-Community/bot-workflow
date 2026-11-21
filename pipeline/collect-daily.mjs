@@ -8,14 +8,19 @@ const { sanitizeInput } = await load('lib/daily-generation.mjs');
 
 // Exports one day of every collected group through the wx CLI (WX_BIN, default `wx` on PATH).
 // Output goes to DAILY_OUTPUT_DIR, by default scratch/daily/<date>/ of the newspaper checkout (ignored by git).
-const date = process.argv[2];
-if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) throw new Error('Usage: WX_ACTIVITY_HOME=... node collect-daily.mjs YYYY-MM-DD');
+const rawArgs = process.argv.slice(2);
+const throughNow = rawArgs.includes('--through-now') || process.env.DAILY_THROUGH_NOW === '1';
+const date = rawArgs.find(arg => !arg.startsWith('--'));
+if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) throw new Error('Usage: WX_ACTIVITY_HOME=... node collect-daily.mjs YYYY-MM-DD [--through-now]');
 if (!process.env.WX_ACTIVITY_HOME) throw new Error('Set WX_ACTIVITY_HOME to the verified AgentHub account home.');
 const start = Date.parse(`${date}T00:00:00+08:00`) / 1000;
 if (!Number.isFinite(start) || new Date(start * 1000 + 8 * 3600_000).toISOString().slice(0, 10) !== date) throw new Error('Invalid date');
-const cutoff = Math.min(Math.floor(Date.now() / 1000), start + 86400);
+const maxEnd = start + (throughNow ? 2 : 1) * 86400;
+const cutoff = Math.min(Math.floor(Date.now() / 1000), maxEnd);
 if (cutoff <= start) throw new Error('Cannot collect a future date.');
-const nextDate = new Date((start + 86400 + 8 * 3600) * 1000).toISOString().slice(0, 10);
+const cutoffDay = new Date((cutoff + 8 * 3600) * 1000).toISOString().slice(0, 10);
+const cutoffDayStart = Date.parse(`${cutoffDay}T00:00:00+08:00`) / 1000;
+const nextDate = new Date((cutoffDayStart + 86400 + 8 * 3600) * 1000).toISOString().slice(0, 10);
 // wx parses --since/--until in the process time zone, so on a Mac set to another zone the export would start
 // at local midnight and drop part of the Beijing day. TZ pins it to the edition's zone. wx also fails now and then
 // with "找不到 … 的消息记录" while its daemon refreshes the decrypted cache; the same command succeeds on retry.
@@ -81,7 +86,7 @@ for (const group of selected) {
     cutoff: new Date(cutoff * 1000).toISOString(), timezone: 'Asia/Shanghai',
     coverage: {
       status: raw.length ? 'local_records' : 'no_local_records',
-      completeDay: cutoff === start + 86400, paginationExhausted: exhausted,
+      completeDay: cutoff === start + 86400, ...(cutoff > start + 86400 ? { throughNow: true } : {}), paginationExhausted: exhausted,
       note: '仅代表当前账号本地可读记录；不保证其他设备或入群前历史完整。',
       count: raw.length, first: raw[0]?.time || null, last: raw.at(-1)?.time || null,
     }, messages,

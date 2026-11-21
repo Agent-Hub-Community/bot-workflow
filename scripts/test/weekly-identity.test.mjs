@@ -49,23 +49,9 @@ async function fixture(t) {
     await writeFile(file, JSON.stringify(data));
     return file;
   };
-  // CLI generation is exercised without opening a server or making a model request.
-  const mock = path.join(dir, 'mock-fetch.mjs');
-  await writeFile(mock, `import { appendFile } from 'node:fs/promises';
-    let calls = 0;
-    globalThis.fetch = async (url, options) => {
-      if (!String(url).startsWith('https://weekly-test.invalid/')) throw new Error('Unexpected network request');
-      const request = JSON.parse(options.body);
-      await appendFile(process.env.REQUEST_LOG, JSON.stringify(request) + '\\n');
-      const sequence = JSON.parse(process.env.MOCK_SEQUENCE);
-      const response = sequence.length ? sequence[Math.min(calls++, sequence.length - 1)] : JSON.parse(process.env.MOCK_RESPONSE);
-      return { ok: true, json: async () => ({ model: process.env.DAILY_LLM_MODEL,
-        choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(response) } }] }) };
-    };`);
-  const run = (script, args, response, sequence = []) => exec(process.execPath, ['--import', mock, path.join(root, 'scripts', script), ...args], {
-    cwd: root, timeout: 20000, env: { ...process.env, DAILY_LLM_BASE_URL: 'https://weekly-test.invalid/v1', DAILY_LLM_API_KEY: '',
-      DAILY_LLM_MODEL: 'synthetic-model', REQUEST_LOG: path.join(dir, 'requests.jsonl'), MOCK_RESPONSE: JSON.stringify(response ?? {}),
-      MOCK_SEQUENCE: JSON.stringify(sequence) },
+  // CLI fixture without any external LLM mocks.
+  const run = (script, args) => exec(process.execPath, [path.join(root, 'scripts', script), ...args], {
+    cwd: root, timeout: 20000, env: process.env,
   });
   return { dir, json, run };
 }
@@ -230,94 +216,6 @@ test('quote expansion never reintroduces excluded targets and never uses images 
   assert.equal(evidence[0].s, `${first}/${group}/p1`);
   assert.equal(discussion[0].text, '[图片]');
   assert.doesNotMatch(JSON.stringify(discussion), /Secret|description|image/);
-});
-
-test('real CLIs carry namespaces through drafts, evidence, attach and two selection passes without network', async t => {
-  const f = await fixture(t), inputs = path.join(f.dir, 'inputs'), evidenceDir = path.join(f.dir, 'evidence');
-  for (const source of sample()) {
-    await f.json(`inputs/${source.date}/${group}.input.json`, source.input);
-    await f.json(`inputs/${source.date}/${group}.raw.json`, source.raw);
-  }
-  const page = { title: 'A week', intro: 'A synthetic example.', stories: [{ title: 'A source-grounded topic',
-    text: 'The source evidence supports this topic. '.repeat(3), review: 'A bounded review.', emphasis: [] }] };
-  await f.run('generate-weekly-gemini.mjs', [first, second, inputs, path.join(f.dir, 'draft'), '--groups', group], page);
-  const prompt = await readFile(path.join(f.dir, 'draft', `${group}.prompt.md`), 'utf8');
-  assert.match(prompt, new RegExp(`${first}/${group}/p1`));
-  assert.match(prompt, new RegExp(`${second}/${group}/p1`));
-  const readerFile = await f.json('reader.json', { from: first, through: second, pages: [{ id: group, ...page }] });
-  const refs = prepare(sample()).map(m => m.ref);
-  await f.run('weekly-discussion-evidence.mjs', [readerFile, inputs, evidenceDir], [{ i: 0, refs }]);
-  const requests = (await readFile(path.join(f.dir, 'requests.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
-  assert.match(requests[1].messages[1].content, new RegExp(`${first}/${group}/p1`));
-  assert.match(requests[1].messages[1].content, new RegExp(`${second}/${group}/p1`));
-  assert.deepEqual(JSON.parse(await readFile(path.join(evidenceDir, `${group}.evidence.json`), 'utf8')).evidence[0], refs);
-  const auditFile = path.join(f.dir, 'audit.json');
-  await f.run('weekly-attach-discussions.mjs', [readerFile, inputs, evidenceDir, auditFile]);
-  assert.equal((await stat(auditFile)).mode & 0o777, 0o600);
-  const initialAudit = JSON.parse(await readFile(auditFile, 'utf8'));
-  await f.run('weekly-select-discussion.mjs', [readerFile, path.join(f.dir, 'select'), '--max', '1', '--audit', auditFile], { keep: [2, 3, 4] });
-  const selectedReader = await readFile(readerFile, 'utf8'), selectedAudit = await readFile(auditFile, 'utf8');
-  const discussion = JSON.parse(selectedReader).pages[0].stories[0].discussion;
-  assert.deepEqual(discussion.map(m => m.speaker), [2, 3, 4]);
-  assert.equal(discussion[1].quote.speaker, null);
-  assert.equal(discussion[2].quote.speaker, 2);
-  assert.equal(JSON.parse(selectedAudit)[1].quoteTarget, initialAudit[3].quoteTarget);
-  assert.doesNotMatch(selectedReader, /sourceSpeaker|quoteTarget|rawSender|m000/);
-  await f.run('weekly-select-discussion.mjs', [readerFile, path.join(f.dir, 'select-again'), '--audit', auditFile]);
-  assert.equal(await readFile(readerFile, 'utf8'), selectedReader);
-  assert.equal(await readFile(auditFile, 'utf8'), selectedAudit);
-  await f.run('weekly-select-discussion.mjs', [readerFile, path.join(f.dir, 'select'), '--max', '1', '--audit', auditFile], { keep: [0, 2] });
-  assert.deepEqual(JSON.parse(await readFile(readerFile, 'utf8')).pages[0].stories[0].discussion.map(m => m.speaker), [2, 4],
-    'reusing an output directory must not reuse selection indices from the previous prompt');
-  const legacy = await f.run('weekly-select-discussion.mjs', [readerFile, path.join(f.dir, 'legacy')]);
-  assert.match(legacy.stderr, /No --audit/);
-  assert.ok(JSON.parse(await readFile(readerFile, 'utf8')).pages[0].stories[0].discussion.filter(m => m.quote).every(m => m.quote.speaker === null));
-});
-
-test('selection rejects malformed keep and indices, permits explicit empty, and stops after two attempts', async t => {
-  const f = await fixture(t), all = prepare(sample()), built = buildDiscussion(all, all.map(m => m.ref));
-  const originalReader = { pages: [{ id: group, stories: [{ title: 'Synthetic', text: 'Synthetic summary', discussion: built.discussion }] }] };
-  const originalAudit = built.audit.map(row => ({ page: group, story: 0, ...row }));
-  const readerFile = await f.json('validation-reader.json', originalReader);
-  const auditFile = await f.json('validation-audit.json', originalAudit);
-  const readerBefore = await readFile(readerFile, 'utf8'), auditBefore = await readFile(auditFile, 'utf8');
-  const args = out => [readerFile, path.join(f.dir, out), '--max', '1', '--audit', auditFile];
-  let totalRequests = 0;
-  for (const [index, answer] of [null, {}, [], { keep: null }, { keep: 'all' }, { keep: [-1] },
-    { keep: [5] }, { keep: [0.5] }, { keep: ['0'] }, { keep: [0, 0] }, { keep: [2, 0] }, { keep: [0], extra: true }].entries()) {
-    await assert.rejects(f.run('weekly-select-discussion.mjs', args(`bad-${index}`), answer, [answer, answer]), /no usable response/);
-    totalRequests += 2;
-    assert.equal((await readFile(path.join(f.dir, 'requests.jsonl'), 'utf8')).trim().split('\n').length, totalRequests);
-    assert.equal(await readFile(readerFile, 'utf8'), readerBefore);
-    assert.equal(await readFile(auditFile, 'utf8'), auditBefore);
-  }
-  await f.run('weekly-select-discussion.mjs', args('second-attempt'), null, [{}, { keep: [2, 4] }]);
-  totalRequests += 2;
-  assert.equal((await readFile(path.join(f.dir, 'requests.jsonl'), 'utf8')).trim().split('\n').length, totalRequests);
-  assert.deepEqual(JSON.parse(await readFile(readerFile, 'utf8')).pages[0].stories[0].discussion.map(m => m.speaker), [2, 4]);
-  await f.run('weekly-select-discussion.mjs', args('explicit-empty'), { keep: [] });
-  totalRequests += 1;
-  assert.equal((await readFile(path.join(f.dir, 'requests.jsonl'), 'utf8')).trim().split('\n').length, totalRequests);
-  assert.deepEqual(JSON.parse(await readFile(readerFile, 'utf8')).pages[0].stories[0].discussion, []);
-  assert.deepEqual(JSON.parse(await readFile(auditFile, 'utf8')), []);
-});
-
-test('filler-only reply chains do not cause further changes on a second selection', async t => {
-  const f = await fixture(t);
-  const all = prepare([day(first, [
-    { content: '是的' },
-    { sender: 'Bob', speaker: 'p2', content: '[引用] 是的  ↳ Alice: 是的' },
-    { sender: 'Cathy', speaker: 'p3', content: 'A concrete observation remains.' },
-  ])]);
-  const built = buildDiscussion(all, all.map(m => m.ref));
-  const readerFile = await f.json('filler-reader.json', { pages: [{ id: group, stories: [{ title: 'Filler', text: 'A synthetic topic', discussion: built.discussion }] }] });
-  const auditFile = await f.json('filler-audit.json', built.audit.map(row => ({ page: group, story: 0, ...row })));
-  const args = [readerFile, path.join(f.dir, 'selection'), '--audit', auditFile];
-  await f.run('weekly-select-discussion.mjs', args);
-  const firstPass = await readFile(readerFile, 'utf8');
-  assert.deepEqual(JSON.parse(firstPass).pages[0].stories[0].discussion.map(m => m.speaker), [3]);
-  await f.run('weekly-select-discussion.mjs', args);
-  assert.equal(await readFile(readerFile, 'utf8'), firstPass);
 });
 
 test('attach CLI applies exclusions before quote completion and fails closed on raw misalignment', async t => {

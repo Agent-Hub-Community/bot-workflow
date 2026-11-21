@@ -6,9 +6,11 @@ import { load, requirePackage } from '../lib/newspaper-root.mjs';
 const { externalWindow } = await load('lib/external-workflow.mjs');
 const { parseHTML } = requirePackage('linkedom');
 
-const [date, directory] = process.argv.slice(2);
-if (!date || !directory) throw new Error('Usage: node "$BOT/scripts/collect-external.mjs" EDITION_DATE NEW_BATCH_DIRECTORY');
-const window = externalWindow(date);
+const rawArgs = process.argv.slice(2);
+const throughNow = rawArgs.includes('--through-now') || process.env.DAILY_THROUGH_NOW === '1';
+const [date, directory] = rawArgs.filter(arg => !arg.startsWith('--'));
+if (!date || !directory) throw new Error('Usage: node "$BOT/scripts/collect-external.mjs" EDITION_DATE NEW_BATCH_DIRECTORY [--through-now]');
+const window = externalWindow(date, undefined, { throughNow });
 const output = path.resolve(directory);
 await mkdir(output, { recursive: true, mode: 0o700 });
 try {
@@ -50,7 +52,7 @@ await capture('hn', 'https://news.ycombinator.com/', async () => {
   return JSON.parse(stdout);
 });
 const since = new Date(Date.parse(window.windowStart)).toISOString().slice(0, 10);
-const until = new Date(Date.parse(`${date}T00:00:00Z`) + 86400000).toISOString().slice(0, 10);
+const until = new Date(Date.parse(window.cutoff) + 86400000).toISOString().slice(0, 10);
 await capture('x', 'https://x.com/', async () => {
   const query = `(AI OR LLM OR agent OR Claude OR Copilot OR OpenAI) since:${since} until:${until} min_faves:500 -filter:replies`;
   const { stdout } = await run('opencli', ['twitter', 'search', query, '--limit', '40', '-f', 'json'],

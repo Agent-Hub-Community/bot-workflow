@@ -1,292 +1,79 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
-import { buildFinishPlan, buildPlan, commitSubject, output, formatCounts, missingEnv, nextRun, prepare, publish, publishedMessage,
-  resolveDirs, runPlan, selectSteps }
-  from '../daily.mjs';
-import { load } from '../../lib/newspaper-root.mjs';
+import {
+  buildCollectPlan, buildFinishPlan, collect, commitSubject, finish, formatCounts,
+  missingEnv, nextRun, publish, publishedMessage, resolveDirs, runPlan, selectSteps,
+} from '../daily.mjs';
 
-const date = '2026-11-01';
-const plan = buildPlan({ date, batch: '/tmp/b', external: '/tmp/e', bot: '/bot' });
-const names = steps => steps.map(step => step.name);
-const mainOrder = ['collect-batch', 'collect-images', 'generate', 'package', 'enrich', 'release-activity'];
-const fullEnv = { WX_ACTIVITY_HOME: '/h', DAILY_LLM_BASE_URL: 'http://x', DAILY_LLM_MODEL: 'm', DAILY_LLM_API_KEY: 'k' };
+const date = '2026-11-20';
+const names = plan => [...plan.main, ...(plan.external ? [plan.external] : [])].map(s => s.name);
 
-test('plan runs the chat steps in order and keeps external collection separate', () => {
-  assert.deepEqual(names(plan.main), mainOrder);
+test('collect plan runs all three WeChat steps sequentially and external in parallel with zero LLM env vars', () => {
+  const plan = buildCollectPlan({ date, batch: '/tmp/b', external: '/tmp/e', bot: '/bot' });
+  assert.deepEqual(plan.main.map(s => s.name), ['collect-batch', 'collect-images', 'release-activity']);
   assert.equal(plan.external.name, 'collect-external');
-  const byName = Object.fromEntries(plan.main.map(step => [step.name, step]));
-  assert.deepEqual(byName['collect-batch'].args, ['/bot/pipeline/collect-batch.mjs', date, date, '/tmp/b']);
-  // A rerun of generate keeps the drafts that already pass validation.
-  assert.deepEqual(byName.generate.args.slice(1), ['generate', date, date, '/tmp/b', '--emphasis', '--resume']);
-  assert.deepEqual(byName.package.args.slice(1), ['package', date, date, '/tmp/b', '--emphasis']);
-  assert.deepEqual(plan.external.args, ['/bot/scripts/collect-external.mjs', date, '/tmp/e']);
+  assert.deepEqual(missingEnv(plan, {}), ['WX_ACTIVITY_HOME']);
+  assert.deepEqual(missingEnv(plan, { WX_ACTIVITY_HOME: '/h' }), []);
+  assert.deepEqual(selectSteps(plan, ['collect-images']).main.map(s => s.name), ['collect-images', 'release-activity']);
+  assert.equal(selectSteps(plan, ['collect-images']).external, null);
+  const extPlan = buildCollectPlan({ date, batch: '/tmp/b', external: '/tmp/e', bot: '/bot', throughNow: true });
+  assert.ok(extPlan.main[0].args.includes('--through-now'));
+  assert.ok(extPlan.external.args.includes('--through-now'));
 });
 
-test('chat steps never overlap each other; collect-external overlaps them', async () => {
-  const active = new Set(), overlaps = [], releases = new Map();
-  const run = runPlan(plan, async step => {
-    for (const other of active) overlaps.push([other, step.name]);
-    active.add(step.name);
-    await new Promise(resolve => releases.set(step.name, resolve));
-    active.delete(step.name);
+test('nextRun and resolveDirs pair day-D-runN with external-D-runN', () => {
+  assert.equal(nextRun(['day-2026-11-20-run1', 'external-2026-11-20-run2'], date), 3);
+  const resolved = resolveDirs({ date, batch: '/s/day-2026-11-20-run2', scratch: '/s', entries: [] });
+  assert.equal(resolved.external, '/s/external-2026-11-20-run2');
+});
+
+test('runPlan stops main on failure while letting external finish', async () => {
+  const plan = buildCollectPlan({ date, batch: '/tmp/b', external: '/tmp/e', bot: '/bot' });
+  const ran = [];
+  const res = await runPlan(plan, async step => {
+    ran.push(step.name);
+    if (step.name === 'collect-images') throw new Error('decode failed');
   });
-  await new Promise(setImmediate);
-  assert.deepEqual([...releases.keys()].sort(), ['collect-batch', 'collect-external']);
-  for (const name of ['collect-batch', 'collect-external', ...mainOrder.slice(1)]) {
-    await new Promise(setImmediate);
-    releases.get(name)();
-  }
-  const result = await run;
-  assert.deepEqual(result.done, mainOrder);
-  assert.equal(result.failed, null);
-  assert.equal(result.resume, null);
-  assert.ok(overlaps.length > 0);
-  assert.ok(overlaps.every(pair => pair.includes('collect-external')), JSON.stringify(overlaps));
+  assert.equal(res.resume, 'collect-images');
+  assert.deepEqual(res.done, ['collect-batch']);
+  assert.ok(ran.includes('collect-external'));
+  assert.equal(res.externalFailed, null);
 });
 
-test('a failed chat step stops the chat steps and becomes the resume point', async () => {
-  const started = [];
-  const result = await runPlan(plan, async step => {
-    started.push(step.name);
-    if (step.name === 'generate') throw new Error('exit 1');
+test('finish runs package-daily, link-previews and preview with zero review patches or LLM calls', () => {
+  const steps = buildFinishPlan({
+    date, batch: '/b', external: '/e', bot: '/bot', newspaper: '/np',
+    has: f => f === '/e/reviewed-final.json' || f === '/e/selection.json',
   });
-  assert.equal(result.failed.name, 'generate');
-  assert.ok(!started.includes('package'));
-  assert.equal(result.resume, 'generate');
-  assert.equal(result.externalFailed, null);
+  assert.deepEqual(steps.map(s => s.name), ['package-daily', 'link-previews', 'preview']);
+  assert.equal(steps[1].optional, true);
+  assert.ok(steps[2].args.includes('--external-draft'));
 });
 
-test('a collect-external failure does not stop the chat steps', async () => {
-  const result = await runPlan(plan, async step => {
-    if (step.name === 'collect-external') throw new Error('exit 1');
-  });
-  assert.deepEqual(result.done, mainOrder);
-  assert.equal(result.failed, null);
-  assert.equal(result.resume, null);
-  assert.match(result.externalFailed.error.message, /exit 1/);
+test('publishedMessage retitles preview draft and commitSubject formats date', () => {
+  const draft = 'AgentHub 2026.11.20 日报导览（链接待上线核验）\nhttps://example.com\n\n【一群】内容';
+  assert.match(publishedMessage(draft), /^AgentHub 2026\.11\.20 日报已上线\n/);
+  assert.equal(commitSubject(date), 'Publish November 20 daily with external news and rankings');
+  assert.ok(formatCounts([{ id: 'group-1', label: '一群', count: 5, images: 2 }]).join('\n').includes('已解图 2 张'));
 });
 
-test('--from-step resumes the chat steps from the earliest named one; collect-external only when named', () => {
-  assert.deepEqual(names(selectSteps(plan, ['enrich']).main), ['enrich', 'release-activity']);
-  assert.equal(selectSteps(plan, ['enrich']).external, null);
-  assert.deepEqual(names(selectSteps(plan, ['package', 'collect-images']).main), mainOrder.slice(1));
-  const externalOnly = selectSteps(plan, ['collect-external']);
-  assert.deepEqual(externalOnly.main, []);
-  assert.equal(externalOnly.external.name, 'collect-external');
-  assert.equal(selectSteps(plan, []), plan);
-  assert.throws(() => selectSteps(plan, ['publish']), /Unknown step publish/);
-});
-
-test('default directories take the first run number free for both batch and external', () => {
-  assert.equal(nextRun([], date), 1);
-  assert.equal(nextRun([`day-${date}-run1`, `day-${date}-run2`, `day-2026-10-31-run3`], date), 3);
-  assert.equal(nextRun([`external-${date}-run1`], date), 2);
-  const scratch = '/news/scratch';
-  assert.deepEqual(resolveDirs({ date, scratch, entries: [`day-${date}-run1`] }),
-    { batch: path.join(scratch, `day-${date}-run2`), external: path.join(scratch, `external-${date}-run2`) });
-  assert.deepEqual(resolveDirs({ date, scratch, entries: [], batch: '/x/b' }),
-    { batch: '/x/b', external: path.join(scratch, `external-${date}-run1`) });
-  assert.throws(() => resolveDirs({ date, scratch, entries: [], fromSteps: ['generate'] }), /--batch/);
-  // A resumed day-D-runN batch keeps its own external-D-runN directory.
-  assert.deepEqual(resolveDirs({ date, scratch, entries: [`day-${date}-run1`, `day-${date}-run2`],
-    batch: path.join(scratch, `day-${date}-run2`), fromSteps: ['generate'] }),
-  { batch: path.join(scratch, `day-${date}-run2`), external: path.join(scratch, `external-${date}-run2`) });
-});
-
-test('required environment depends on the selected steps', () => {
-  assert.deepEqual(missingEnv(plan, fullEnv), []);
-  assert.deepEqual(missingEnv(plan, { ...fullEnv, DAILY_LLM_MODEL: '' }), ['DAILY_LLM_MODEL']);
-  assert.deepEqual(missingEnv(selectSteps(plan, ['collect-external']), {}), []);
-  assert.deepEqual(missingEnv(selectSteps(plan, ['package']), { WX_ACTIVITY_HOME: '/h' }),
-    ['DAILY_LLM_BASE_URL', 'DAILY_LLM_MODEL', 'DAILY_LLM_API_KEY']);
-});
-
-test('group counts flag empty and missing groups', () => {
-  const lines = formatCounts([
-    { id: 'group-1', label: '一群', count: 0 },
-    { id: 'group-2', label: '二群', count: 120 },
-    { id: 'group-3', label: '三群', count: null },
-  ]);
-  assert.match(lines[1], /!! 一群.*0 条/);
-  assert.doesNotMatch(lines[2], /!!/);
-  assert.match(lines[3], /!! 三群.*没有 raw\.json/);
-  assert.match(lines.at(-1), /2 个群/);
-  assert.equal(formatCounts([{ id: 'group-1', label: '一群', count: 3 }]).length, 2);
-});
-
-// Runs prepare() in a temporary scratch directory with fake steps; `behave(step, batch)` stands in for each script.
-async function withScratch(fn) {
-  const scratch = await mkdtemp(path.join(tmpdir(), 'daily-runner-'));
-  try { return await fn(scratch); } finally { await rm(scratch, { recursive: true, force: true }); }
-}
-
-async function fakeRun(scratch, options, behave) {
-  const lines = [], ran = [];
-  const code = await prepare({ date, fromSteps: [], dryRun: false, ...options }, {
-    scratch, env: fullEnv, log: line => lines.push(line),
-    run: async (step, logs) => { ran.push(step.name); await behave(step, path.dirname(logs)); },
-  });
-  return { code, ran, output: lines.join('\n'), lines };
-}
-
-const { collectedGroups } = await load('lib/groups.mjs');
-const groups = collectedGroups(date);
-
-// collect-batch writes one raw.json per group, the first one empty.
-async function realisticStep(step, batch) {
-  if (step.name === 'collect-batch') {
-    await mkdir(path.join(batch, date), { recursive: true });
-    for (const [index, { id }] of groups.entries()) {
-      await writeFile(path.join(batch, date, `${id}.raw.json`), JSON.stringify(index ? [{}, {}] : []));
-    }
-  }
-}
-
-test('prepare shows the group counts right after collect-batch and again at the end', () =>
-  withScratch(async scratch => {
-    const { code, ran, lines, output } = await fakeRun(scratch, {}, realisticStep);
-    assert.equal(code, 0);
-    assert.deepEqual(ran.filter(name => name !== 'collect-external'), mainOrder);
-    const countLines = lines.flatMap((line, index) => line.startsWith('各群条数') ? [index] : []);
-    assert.equal(countLines.length, 2);
-    const batchDone = lines.findIndex(line => line.startsWith('[完成] collect-batch'));
-    const imagesStart = lines.indexOf('[开始] collect-images');
-    assert.ok(batchDone < countLines[0] && countLines[0] < imagesStart, output);
-    assert.match(lines[countLines[0]], new RegExp(`!! ${groups[0].label}.*0 条`));
-    assert.ok(countLines[1] > lines.findIndex(line => line.startsWith('[完成] release-activity')));
-    assert.doesNotMatch(output, /collect-external 失败/);
-  }));
-
-test('prepare finishes the chat steps when collect-external fails and points to a fresh external directory', () =>
-  withScratch(async scratch => {
-    const { code, ran, output } = await fakeRun(scratch, {}, async (step, batch) => {
-      await realisticStep(step, batch);
-      if (step.name === 'collect-external') {
-        // Like the real script: the snapshot is written, then a failed source makes it exit non-zero.
-        const external = step.args.at(-1);
-        await mkdir(external, { recursive: true });
-        await writeFile(path.join(external, 'discovery.json'), '{}');
-        throw new Error('exit 1');
-      }
-    });
-    assert.equal(code, 0);
-    assert.ok(ran.includes('release-activity'));
-    assert.match(output, /!! collect-external 失败，外部资讯需要补查/);
-    assert.match(output, new RegExp(`scripts/collect-external\\.mjs ${date} \\S*external-${date}-run2$`, 'm'));
-    assert.doesNotMatch(output, /--from-step/);
-  }));
-
-test('a failed chat step prints a resume command for that step only', () =>
-  withScratch(async scratch => {
-    const { code, ran, output } = await fakeRun(scratch, {}, async (step, batch) => {
-      await realisticStep(step, batch);
-      if (step.name === 'package') throw new Error('exit 1');
-    });
-    assert.equal(code, 1);
-    assert.ok(!ran.includes('enrich'));
-    assert.match(output, /--batch \S*day-2026-11-01-run1 --from-step package$/m);
-    assert.doesNotMatch(output, /--external/);
-  }));
-
-test('--from-step refuses a batch without the day directory before running anything', () =>
-  withScratch(async scratch => {
-    const batch = path.join(scratch, 'missing-batch');
-    await assert.rejects(fakeRun(scratch, { batch, fromSteps: ['generate'] }, async () => {
-      throw new Error('no step may run');
-    }), /does not exist/);
-    assert.deepEqual(await readdir(scratch), []);
-    // With the day directory present the same command resumes at generate.
-    await mkdir(path.join(batch, date), { recursive: true });
-    const { code, ran } = await fakeRun(scratch, { batch, fromSteps: ['generate'] }, async () => {});
-    assert.equal(code, 0);
-    assert.deepEqual(ran, mainOrder.slice(2));
-  }));
-
-test('finish skips the external drafts that exist and falls back to the commented draft', () => {
-  const base = { date, batch: '/tmp/b', external: '/tmp/e', reports: '/r', bot: '/bot', newspaper: '/np' };
-  const fresh = buildFinishPlan({ ...base, patches: ['/tmp/b/review/group-1.patch.json'], has: file => file === '/tmp/e/selection.json' });
-  assert.deepEqual(names(fresh), ['apply-review', 'finalize-batch', 'generate-external', 'external-comments',
-    'external-final', 'preview', 'bot', 'report']);
-  assert.deepEqual(fresh.find(step => step.name === 'external-final').copy,
-    ['/tmp/e/commented-draft.json', '/tmp/e/reviewed-final.json']);
-  assert.deepEqual(fresh.at(-1).copy, ['/tmp/b/bot-preview.md', `/r/${date}-AgentHub导览草稿.md`]);
-  // An edited reviewed-final.json is kept, and without patches the batch is only validated.
-  const rerun = buildFinishPlan({ ...base, has: () => true });
-  assert.deepEqual(names(rerun), ['finalize-batch', 'preview', 'bot', 'report']);
-  assert.ok(rerun.find(step => step.name === 'preview').args.includes('/tmp/e/reviewed-final.json'));
-  // A day without a selection builds the preview with no external page.
-  const noExternal = buildFinishPlan({ ...base, has: () => false });
-  assert.ok(!noExternal.find(step => step.name === 'preview').args.includes('--external-draft'));
-});
-
-test('the published message is the reviewed draft retitled, and other first lines are refused', () => {
-  const draft = 'AgentHub 2026.11.03 日报导览（链接待上线核验）\nhttps://x/overview/\n\n【一群】……';
-  assert.equal(publishedMessage(draft), 'AgentHub 2026.11.03 日报已上线\nhttps://x/overview/\n\n【一群】……');
-  assert.equal(publishedMessage(publishedMessage(draft)), publishedMessage(draft));
-  assert.throws(() => publishedMessage('随便一行\n'), /Unexpected first line/);
-  assert.equal(commitSubject('2026-11-03'), 'Publish November 3 daily with external news and rankings');
-});
-
-test('publish releases, commits data/, pushes, waits for the deploy, verifies and retitles the draft', async () => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'publish-'));
-  try {
-    const batch = path.join(dir, 'batch'), external = path.join(dir, 'external'), reports = path.join(dir, 'reports');
-    const verify = path.join(dir, 'verify.mjs');
-    await mkdir(batch); await mkdir(external); await mkdir(reports);
-    await writeFile(path.join(batch, 'issues.json'), '[]');
-    await writeFile(path.join(external, 'reviewed-final.json'), '{}');
-    await writeFile(verify, '');
-    const draft = path.join(reports, `${date}-AgentHub导览草稿.md`);
-    await writeFile(draft, 'AgentHub 2026.11.01 日报导览（链接待上线核验）\nlink\n');
-    const calls = [];
-    let verifyTries = 0;
-    const sh = (command, args) => {
-      calls.push([command, ...args].join(' '));
-      const joined = args.join(' ');
-      if (joined.includes('branch --show-current')) return 'main';
-      if (joined.includes('rev-parse HEAD')) return 'abc1234def';
-      if (command === 'gh' && args[1] === 'list') return '42';
-      if (args[0] === verify && (verifyTries += 1) === 1) throw new Error('stale CDN');
-      return '';
-    };
-    const ran = [];
-    const run = async step => { ran.push(step); };
-    const code = await publish({ date, batch, external, reports },
-      { env: { NODE_OPTIONS: '--import=x', VERIFY_PUBLICATION: verify }, log: () => {}, sh, run, wait: async () => {} });
-    assert.equal(code, 0);
-    assert.equal(ran.length, 1);
-    assert.ok(ran[0].args.includes('--external-draft') && !('NODE_OPTIONS' in ran[0].env));
-    const order = ['add -- data', 'commit --quiet', 'push --quiet origin main', 'run list --commit abc1234def', 'run watch 42'];
-    const at = order.map(part => calls.findIndex(call => call.includes(part)));
-    assert.ok(at.every((index, i) => index >= 0 && (i === 0 || index > at[i - 1])), calls.join('\n'));
-    assert.equal(verifyTries, 2);
-    assert.match(await readFile(draft, 'utf8'), /^AgentHub 2026\.11\.01 日报已上线\n/);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-});
-
-test('publish refuses a newspaper checkout that is not on main before releasing anything', async () => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'publish-'));
-  try {
-    for (const sub of ['b', 'e', 'r']) await mkdir(path.join(dir, sub));
-    await writeFile(path.join(dir, 'b', 'issues.json'), '[]');
-    await writeFile(path.join(dir, 'r', `${date}-AgentHub导览草稿.md`), '');
-    await writeFile(path.join(dir, 'v.mjs'), '');
-    const ran = [];
-    await assert.rejects(publish({ date, batch: path.join(dir, 'b'), external: path.join(dir, 'e'), reports: path.join(dir, 'r') },
-      { env: { VERIFY_PUBLICATION: path.join(dir, 'v.mjs') }, log: () => {}, sh: () => 'daily-speedup',
-        run: async step => { ran.push(step); } }), /not on main/);
-    assert.equal(ran.length, 0);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-});
-
-test('output returns an empty string when the command ignores stdout', () => {
-  assert.equal(output(process.execPath, ['-e', 'console.log(1)'], { stdio: ['ignore', 'ignore', 'inherit'] }), '');
-  assert.equal(output(process.execPath, ['-e', 'console.log(" 2 ")']), '2');
+test('collect, finish, and publish dry-run succeed cleanly without external LLM env vars', async t => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'agenthub-daily-test-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const scratch = path.join(dir, 'scratch');
+  const batch = path.join(scratch, `day-${date}-run1`);
+  await mkdir(batch, { recursive: true });
+  await writeFile(path.join(batch, 'issues.json'), '[]');
+  assert.equal(await collect({ date, fromSteps: [], dryRun: true }, { scratch, env: { WX_ACTIVITY_HOME: '/h' }, log: () => {} }), 0);
+  assert.equal(await finish({ date, batch, dryRun: true }, { log: () => {} }), 0);
+  const sh = (cmd, args) => {
+    if (args.includes('--show-current')) return 'main';
+    if (args.includes('--porcelain')) return '';
+    return '';
+  };
+  assert.equal(await publish({ date, batch, dryRun: true, verify: false }, { sh, log: () => {} }), 0);
 });

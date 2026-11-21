@@ -119,6 +119,69 @@ export async function locateImage(attachRoot, username, createTime, hash) {
   return { quality: 'missing', file: null };
 }
 
+// WeChat stores unencrypted videos and posters under <account>/msg/video/YYYY-MM/.
+// Prefers standard .mp4 over _raw.mp4 for faster web playback, falling back to _raw.mp4 and poster-only.
+export async function locateVideo(videoRoot, createTime, hash) {
+  if (!hash) return { video: null, poster: null };
+  const time = new Date(createTime * 1000);
+  const month = `${time.getFullYear()}-${String(time.getMonth() + 1).padStart(2, '0')}`;
+  const dir = path.join(videoRoot, month);
+  const files = new Set(await readdir(dir).catch(() => []));
+  const video = ['.mp4', '_raw.mp4'].map(suf => `${hash}${suf}`).find(name => files.has(name));
+  const poster = ['.jpg', '_thumb.jpg'].map(suf => `${hash}${suf}`).find(name => files.has(name));
+  return {
+    video: video ? path.join(dir, video) : null,
+    poster: poster ? path.join(dir, poster) : null,
+  };
+}
+
+// Parses WeChat exported file message text: "[文件] name (size, ext, md5=...)" or "[文件] name".
+export function parseFileMessage(text) {
+  const trimmed = (text || '').trim();
+  const match = /^\[文件\]\s*(.+?)(?:\s*\(([^()]*)\))?$/.exec(trimmed);
+  if (!match) return null;
+  const name = match[1].trim();
+  const meta = match[2] || '';
+  const detail = meta.split(',')[0]?.trim() || '';
+  const md5Match = /md5=([0-9a-f]{32})/i.exec(meta);
+  return { name, detail, md5: md5Match ? md5Match[1].toLowerCase() : null };
+}
+
+// Locates a downloaded WeChat file under <account>/msg/file/YYYY-MM/ by exact filename or content md5.
+export async function locateFile(fileRoot, createTime, filename, wantedMd5, { maxBytes = 45 * 1024 * 1024 } = {}) {
+  const time = new Date(createTime * 1000);
+  const month = `${time.getFullYear()}-${String(time.getMonth() + 1).padStart(2, '0')}`;
+  const months = [month, ...(await readdir(fileRoot).catch(() => [])).filter(m => /^\d{4}-\d{2}$/.test(m) && m !== month).sort().reverse()];
+  const checked = new Set();
+  for (const m of months) {
+    const dir = path.join(fileRoot, m);
+    const entries = await readdir(dir).catch(() => []);
+    if (filename && entries.includes(filename)) {
+      const full = path.join(dir, filename);
+      const data = await readFile(full).catch(() => null);
+      if (data && data.length <= maxBytes && (!wantedMd5 || md5(data) === wantedMd5)) {
+        return { file: full, bytes: data.length, md5: md5(data) };
+      }
+      checked.add(full);
+    }
+    if (wantedMd5) {
+      const ext = filename ? path.extname(filename).toLowerCase() : '';
+      for (const entry of entries) {
+        if (ext && path.extname(entry).toLowerCase() !== ext) continue;
+        const full = path.join(dir, entry);
+        if (checked.has(full)) continue;
+        checked.add(full);
+        const data = await readFile(full).catch(() => null);
+        if (data && data.length <= maxBytes && md5(data) === wantedMd5) {
+          return { file: full, bytes: data.length, md5: wantedMd5 };
+        }
+      }
+    }
+    if (m === month && !wantedMd5) break;
+  }
+  return { file: null, bytes: 0, md5: null };
+}
+
 // WeChat stores some images as wxgf, an HEVC bitstream behind a small header, and some as GIF.
 // ffmpeg turns either into one JPEG frame so the image model gets a format it accepts.
 export function convertToJpeg(data, format, { ffmpeg = 'ffmpeg' } = {}) {
