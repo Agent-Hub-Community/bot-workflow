@@ -4,21 +4,23 @@
 
 整套流程完全由 **Antigravity（Gemini）及其并行 subagent** 驱动：
 - **零外部 LLM API**：不再依赖 `gemini-4-argon`、`gpt-6-luna`、`magpie`、`coproxy` 或任何 `DAILY_LLM_*` 配置；
-- **零内容审核与二轮审稿补丁**：去掉人工审稿补丁、隐私审查和头像审批阻塞；
-- **聊天记录原生静态媒体**：已解码图片自动挂载进讨论面板，视频/语音/文件自动展示卡片。
+- **零二轮审稿阻塞**：每个群由独立 subagent（T3 Code 优先 `delegate_task`）直读消息与关键图片，一步产出含 `tldr`、`points`（精确消息溯源 `refs`）、正文、`emphasis` 与 `Bot 锐评` 的定稿；
+- **聊天记录原生静态媒体**：已解码图片自动转 WebP 挂载进讨论面板，视频/语音/文件自动展示卡片并增量缓存链接预览；
+- **极简入库与合并发布**：`publish` 默认 `--skip-build` 0 秒纯数据入库（无需本地 `FEEDBACK_API_URL` 也不重复编 `dist/`），多日补发支持 `--no-push` 合并为单次推送由 GitHub Actions 统一测试、构建并部署。
 
 ## 日报 4 步流程
 
 ```text
-1. daily.mjs collect D        本地串行：微信采集 -> 纯本地解图 -> 活跃榜；并行：外部资讯候选
+1. daily.mjs collect D        本地串行：微信采集（最新期默认 --through-now 截到生成时刻）-> 纯本地解图 -> 活跃榜；并行：外部资讯候选
         |
-2. Antigravity 并行 subagent  每群 1 个 subagent（直接 read_file 看图）直出 draft.json；
-        |                     外部资讯 subagent 同步核实并直出 reviewed-final.json
+2. Antigravity 并行 subagent  每群 1 个 subagent（直接 read_file 看关键图）直出含 tldr/points/refs/Bot 锐评的 draft.json；
+        |                     外部资讯 subagent 同步核实一手来源并直出 reviewed-final.json
         v
-3. daily.mjs finish D         打包 issues.json + 自动挂载媒体附件 + 本地预览 + bot-input.json
+3. daily.mjs finish D         打包 issues.json + 自动挂载媒体附件 + 增量链接预览 + 本地预览 + bot-input.json
         |                     主 agent 直出导览草稿并用 check-bot.mjs 校准排版
         v
-4. daily.mjs publish D        获准后入库（含附件与头像）-> 公开构建 -> 语义向量 -> D1 -> 推送部署
+4. daily.mjs publish D        获准后 0 秒纯数据入库（--skip-build）-> commit -> push -> GitHub Actions 测试构建部署（--verify 可选回读核验）
+                              多日补发前几期加 --no-push，最后一期统一 push 一次部署
 ```
 
 ## 安装与环境
