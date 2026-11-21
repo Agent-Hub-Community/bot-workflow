@@ -200,7 +200,9 @@ export async function publish(options, { env = process.env, log = console.log, s
   const selection = external ? path.join(external, 'selection.json') : null;
   const verify = env.VERIFY_PUBLICATION || path.join(botDir, 'skill/scripts/verify-publication.mjs');
   const git = args => sh('git', ['-C', rootDir, ...args]);
-  const steps = ['release', 'commit', 'push', 'deploy', ...(options.verify ? ['verify'] : []), ...(existsSync(draft) ? ['message'] : [])];
+  const steps = options.noPush
+    ? ['release', 'commit']
+    : ['release', 'commit', 'push', 'deploy', ...(options.verify ? ['verify'] : []), ...(existsSync(draft) ? ['message'] : [])];
   log(`发布（依次）：${steps.join(' -> ')}`);
 
   if (!existsSync(path.join(batch, 'issues.json'))) throw new Error(`Missing ${path.join(batch, 'issues.json')}; run finish first`);
@@ -230,6 +232,7 @@ export async function publish(options, { env = process.env, log = console.log, s
     const withSelection = Boolean(withExternal && selection && existsSync(selection));
     await step('release', () => run({ name: 'release', env: childEnv, args: [path.join(rootDir, 'scripts/release.mjs'),
       '--daily-batch', batch,
+      ...(options.localBuild ? [] : ['--skip-build']),
       ...(withExternal ? ['--external-draft', final, ...(withSelection ? ['--external-selection', selection] : [])] : [])] }, logs));
     await run({ name: 'link-previews', env: childEnv, args: [path.join(botDir, 'scripts/fetch-link-previews.mjs'), '--batch', batch] }, logs)
       .catch(error => log(`[警告] link-previews 未完成（不阻断发布）：${error.message}`));
@@ -238,6 +241,10 @@ export async function publish(options, { env = process.env, log = console.log, s
       git(['commit', '--quiet', '-m', commitSubject(date)]);
       sha = git(['rev-parse', 'HEAD']);
     });
+    if (options.noPush) {
+      log(`已本地提交 ${date}（--no-push，提交 ${sha.slice(0, 7)}），待后续统一 push 上线`);
+      return 0;
+    }
     await step('push', () => git(['push', '--quiet', 'origin', 'main']));
     await step('deploy', async () => {
       let id = '';
@@ -283,13 +290,15 @@ function parseArgs(argv) {
   const [command, date, ...rest] = argv;
   if (!['collect', 'finish', 'publish'].includes(command) || !/^\d{4}-\d{2}-\d{2}$/.test(date || '')) {
     throw new Error('Usage: daily.mjs collect|finish|publish YYYY-MM-DD [--batch DIR] [--external DIR] [--reports DIR]' +
-      ' [--from-step STEP[,STEP]] [--through-now|--strict-day] [--verify] [--dry-run]');
+      ' [--from-step STEP[,STEP]] [--through-now|--strict-day] [--no-push] [--local-build] [--verify] [--dry-run]');
   }
-  const options = { command, date, fromSteps: [], dryRun: false, verify: false, throughNow: undefined };
+  const options = { command, date, fromSteps: [], dryRun: false, verify: false, noPush: false, localBuild: false, throughNow: undefined };
   for (let i = 0; i < rest.length; i += 1) {
     const flag = rest[i];
     if (flag === '--dry-run') options.dryRun = true;
     else if (flag === '--verify') options.verify = true;
+    else if (flag === '--no-push') options.noPush = true;
+    else if (flag === '--local-build') options.localBuild = true;
     else if (flag === '--through-now') options.throughNow = true;
     else if (flag === '--strict-day') options.throughNow = false;
     else if (['--batch', '--external', '--reports', '--from-step'].includes(flag) && rest[i + 1] && !rest[i + 1].startsWith('--')) {

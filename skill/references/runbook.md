@@ -77,12 +77,18 @@ node "$BOT/scripts/check-bot.mjs" "$BATCH/bot-input.json" "$REPORTS/$D-AgentHub�
 ## 5. 发布上线（获准后）
 
 ```sh
-node "$BOT/scripts/daily.mjs" publish "$D" --batch "$BATCH" --external "$EXTERNAL"
+# 单日发布
+node "$BOT/scripts/daily.mjs" publish "$D" --batch "$BATCH" --external "$EXTERNAL" --verify
+
+# 多日补发：前几期只做本地入库+commit（0 秒），最后一期统一 push + deploy + verify
+node "$BOT/scripts/daily.mjs" publish "$D1" --batch "$BATCH1" --external "$EXTERNAL1" --no-push
+node "$BOT/scripts/daily.mjs" publish "$D2" --batch "$BATCH2" --external "$EXTERNAL2" --verify
 ```
 
-依次执行：`newspaper/scripts/release.mjs`（日报 + 附件 + 头像 + 外部资讯入库、单次公开构建、可选语义向量与 D1 `stories` ID 登记以支持 `discussion_opens` 统计；已移除点赞/点踩）→ 增量 `fetch-link-previews.mjs` → `git commit` → `git push origin main` → `gh run watch` 等待 GitHub Actions 构建部署完成 → 把导览草稿首行改成 `日报已上线`。
+依次执行：`newspaper/scripts/release.mjs --skip-build`（纯数据入库：日报 + 附件 + 头像 + 外部资讯，不要求本地 `FEEDBACK_API_URL` 也不重复编 `dist/`）→ 增量 `fetch-link-previews.mjs` → `git commit` → `git push origin main` → `gh run watch` 等待 GitHub Actions 跑完 `npm test`、公开构建与 Pages 部署 → 把导览草稿首行改成 `日报已上线`。
 
-如需要额外线上回读核验，可加 `--verify` 触发 `verify-publication.mjs`。
+- 如需本地运行完整公开构建与 D1 登记，可显式追加 `--local-build`。
+- 如需要额外线上回读核验，加 `--verify` 触发 `verify-publication.mjs`。
 
 ### 修旧刊期
 

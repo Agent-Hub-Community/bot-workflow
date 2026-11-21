@@ -55,10 +55,14 @@
   "stories": [
     {
       "category": "短标签（如 模型发布 / Agent 工程 / 评测 / 论文 / 行业动态）",
-      "title": "具体的标题",
-      "text": "纯文本正文，长讨论用空行分段，不用 Markdown 或 HTML",
+      "title": "短、尖、像人话的具体标题",
+      "tldr": "1-2句、35-75字速览：直接亮核心结论、反差数字或争议焦点，供列表卡片一眼扫完",
+      "points": [
+        { "text": "一句话拆出一个关键观点、实测结果或分歧点（20-55字）", "refs": ["m0012", "m0015"] }
+      ],
+      "text": "详尽的纯文本正文（可充分展开细节、来龙去脉和原话，长讨论用空行分段，不用 Markdown 或 HTML）",
       "emphasis": ["正文里逐字唯一出现的重点短句"],
-      "aiComment": "一句有信息量又接梗的 Bot 锐评",
+      "aiComment": "一句生动活泼、紧扣本条细节的搞笑网感 Bot 锐评",
       "evidence_ids": ["m0012", "m0015"],
       "discussion_range": { "first": "m0012", "last": "m0035", "drop": [] },
       "resources": [
@@ -72,5 +76,6 @@
 }
 ```
 
+- `tldr` 与 `points` 用于“速览卡片 + 详读抽屉溯源跳转”：长讨论写 2–4 条 `points`，短讯可写 1–2 条或省略；每条 `points[].refs` 填对应最关键的 1–2 个消息 id（须落在 `discussion_range` 内），打包时会自动转成可点击的“↗ 时间 · 群友 N”跳转角标，点击直跳原始讨论对应气泡。
 - `discussion_range` 指定“原始讨论”面板要截取的起止消息 id（`drop` 可剔除夹杂其中的纯跑题消息 id）；如果不写，打包脚本会自动取 `evidence_ids` 的首尾范围并自动把图片/视频/文件挂载到对应聊天记录里。
 - `resources` 的 `kind` 只能是 `paper`、`article`、`code`、`demo`、`discussion`，`url` 必须是公开的 `https://` 链接；没有时省略或写 `[]`。

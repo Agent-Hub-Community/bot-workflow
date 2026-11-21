@@ -8,7 +8,7 @@ description: "基于 Antigravity（Gemini）与并行子任务（T3 Code `delega
 整套流程完全由 **Antigravity（Gemini）及其并行子任务**驱动，**不再依赖任何外部 HTTP 模型 API**（无 `argon` / `gpt-6-luna` / `magpie` / `coproxy` / `DAILY_LLM_*`），也**不再做内容审核、隐私审查或二轮审稿补丁**。脚本只做确定性的本地读写、图片解码、媒体挂载、静态构建和发布。
 
 > **子任务派发规范（重要）**：
-> - 在 **T3 Code** 环境下（尤其当对话工作区不是 `/Users/haoqing/Documents/Github/summary_bot` 时），**优先使用 T3 Code 的 `delegate_task`**（先调一次 `orchestrator_capabilities`，再并行派发 `mode: "async"`、`target: { providerInstanceId: "antigravity", model: "gemini-4-neon", options: { thought_level: "low" } }` 的子任务）。原因是 Antigravity 原生 `invoke_subagent` 在读写当前工作区之外的路径（如 `$NEWSPAPER/scratch`）时会触发底层权限拦截且无法透传到 T3 UI，导致子 agent 卡死；而 `delegate_task` 继承 T3 会话的 `full-access` 权限，跨目录读写无阻碍且在 UI 中可独立观测进度。设为 `thought_level: "medium"`（且提示分批读图、每次 6–8 张）可避免重图大群或外部资讯单步思考超 20 分钟触发上游断线。
+> - 在 **T3 Code** 环境下（尤其当对话工作区不是 `/Users/haoqing/Documents/Github/summary_bot` 时），**优先使用 T3 Code 的 `delegate_task`**（先调一次 `orchestrator_capabilities`，再并行派发 `mode: "async"`、`target: { providerInstanceId: "antigravity", model: "gemini-4-neon", options: { thought_level: "medium" } }` 的子任务）。原因是 Antigravity 原生 `invoke_subagent` 在读写当前工作区之外的路径（如 `$NEWSPAPER/scratch`）时会触发底层权限拦截且无法透传到 T3 UI，导致子 agent 卡死；而 `delegate_task` 继承 T3 会话的 `full-access` 权限，跨目录读写无阻碍且在 UI 中可独立观测进度。默认统一用 `thought_level: "medium"`（重图大群或外部资讯提示分批读图、每次 6–8 张），可避免 `high` 档位长思考死循环或单步超 20 分钟触发上游断线。
 > - 仅在没有 `delegate_task` 工具且工作区位于 `/Users/haoqing/Documents/Github/summary_bot` 时，回退到原生 `invoke_subagent`（`TypeName: "self"`）。
 > - 消息很少的小群/专项群（如合计不足 60 条的 `group-2`/`group-7`/`group-8`）可合并给 1 个子任务一起写，补跑多天时注意总并发不超过 `maxBatchThreads`（20）。
 
@@ -53,9 +53,9 @@ description: "基于 Antigravity（Gemini）与并行子任务（T3 Code `delega
    串行完成 `collect-batch`（导出各群聊天）→ `collect-images`（纯本地解 `.dat` 图到 `$BATCH/$D/media/<group>/`）→ `prepare-release-activity`（算活跃榜并自动过滤微信占位头像），同时并行抓取外部资讯基础候选（`collect-external`）。
 
 2. **并行派发子任务一步出稿**
-   在一个 turn 里并行调用 `delegate_task`（T3 Code 环境，先调一次 `orchestrator_capabilities`，以 `mode: "async"`、`target: { providerInstanceId: "antigravity", model: "gemini-4-neon" }` 派发；无 T3 工具且位于 `summary_bot` 工作区时改用 `invoke_subagent`）：
-   - **每个有较多消息的群各派 1 个子任务**（`group-1`..`group-8`，消息很少的群/专项群可合并为 1 个子任务）：读 `$BOT/prompts/daily-group.md`、`$BOT/prompts/daily-comment.md`、`$BATCH/$D/<group>.input.json`、同目录 `raw.json`，并直接用 `read_file` 查看 `$BATCH/$D/media/<group>/` 下解出的图片，一次性写出完成版 `$BATCH/$D/<group>.draft.json`（含 `heading`、`theme`、`stories`、`emphasis`、`aiComment`、`evidence_ids` / `discussion_range`、`resources`、`image_alts`），写完用 `node` 自检 JSON 合法性。
-   - **同时派 1 个外部资讯子任务**：读 `$EXTERNAL/discovery.json`、[资讯补查](references/external-sources.md)、`$BOT/prompts/external-editor.md` 和 `$BOT/prompts/daily-comment.md`，核实一手原文后直接写出 `$EXTERNAL/selection.json` 和 `$EXTERNAL/reviewed-final.json`（自带 `emphasis` 和 `aiComment`），写完用 `node` 校验 JSON 与链接一致。
+   在一个 turn 里并行调用 `delegate_task`（T3 Code 环境，先调一次 `orchestrator_capabilities`，以 `mode: "async"`、`target: { providerInstanceId: "antigravity", model: "gemini-4-neon", options: { thought_level: "low" } }` 派发；无 T3 工具且位于 `summary_bot` 工作区时改用 `invoke_subagent`）：
+   - **每个有较多消息的群各派 1 个子任务**（`group-1`..`group-8`，消息很少的群/专项群可合并为 1 个子任务）：读 `$BOT/prompts/daily-group.md`、`$BOT/prompts/daily-comment.md`、`$BATCH/$D/<group>.input.json`、同目录 `raw.json`，并按需用 `read_file` 查看 `$BATCH/$D/media/<group>/` 下最关键的 6–10 张图片（避免一次读入几十张图触发长连接超时），一次性写出完成版 `$BATCH/$D/<group>.draft.json`（含 `heading`、`theme`、`stories`、`tldr`、`points`（带精确 `refs` 供详情页穿插正文溯源）、`emphasis`、`aiComment`（Bot 锐评）、`evidence_ids` / `discussion_range`、`resources`、`image_alts`），写完用 `node` 自检 JSON 合法性。
+   - **同时派 1 个外部资讯子任务**：读 `$EXTERNAL/discovery.json`、[资讯补查](references/external-sources.md)、`$BOT/prompts/external-editor.md` 和 `$BOT/prompts/daily-comment.md`，核实一手原文后直接写出 `$EXTERNAL/selection.json` 和 `$EXTERNAL/reviewed-final.json`（含 `tldr`、`points`、`sources`、`emphasis` 和 `aiComment`），写完用 `node` 校验 JSON 与链接一致。
 
 3. **打包、自动挂载媒体与本地预览（1 条命令）+ 写导览**
    ```sh
@@ -64,11 +64,16 @@ description: "基于 Antigravity（Gemini）与并行子任务（T3 Code `delega
    自动打包 `issues.json`、把已解图片和视频/语音/文件卡片挂载到对应聊天记录（`$BATCH/attachments/...`）、生成本地预览（`$BATCH/preview`）和导览输入（`$BATCH/bot-input.json`）。
    主 agent 读 `$BATCH/bot-input.json` 和 `$BOT/prompts/daily-bot.md`，直接写出 `$REPORTS/$D-AgentHub导览草稿.md`，并用 `node "$BOT/scripts/check-bot.mjs" "$BATCH/bot-input.json" "$REPORTS/$D-AgentHub导览草稿.md" --fix` 校准版式和字数。
 
-4. **发布（获准后，1 条命令）**
+4. **发布（获准后，1 条命令；多日补发支持 `--no-push` 合并一次推送）**
    ```sh
-   node "$BOT/scripts/daily.mjs" publish "$D" --batch "$BATCH" --external "$EXTERNAL"
+   # 单日发布
+   node "$BOT/scripts/daily.mjs" publish "$D" --batch "$BATCH" --external "$EXTERNAL" --verify
+
+   # 多日连发：前几期加 --no-push（0 秒本地入库提交），最后一期统一 push + deploy + verify
+   node "$BOT/scripts/daily.mjs" publish "$D1" --batch "$BATCH1" --external "$EXTERNAL1" --no-push
+   node "$BOT/scripts/daily.mjs" publish "$D2" --batch "$BATCH2" --external "$EXTERNAL2" --verify
    ```
-   自动执行入库（含附件与头像）、增量链接预览抓取、单次公开构建、可选语义向量与 D1 `stories` ID 登记（供 `discussion_opens` 讨论打开统计）、提交推送、等待 GitHub Actions 部署完成，并将导览标题改为“日报已上线”（前端已移除点赞/点踩，保留 `views.js` 流量统计、`discussion_opens`、搜索与 Agent 读取统计）。
+   默认向 `release.mjs` 传入 `--skip-build`：本地只做纯数据入库（日报 + 附件 + 头像 + 外部资讯 + 增量链接预览）与 `git commit`（无需本地配 `FEEDBACK_API_URL` 也不重复编 `dist/`），推送后由 GitHub Actions 统一跑全套 `npm test`、公开构建与 Pages 部署；如需本地执行完整公开构建与 D1 登记可显式加 `--local-build`。上线后自动将导览标题改为“日报已上线”。
 
 ## 媒体、链接预览与性能红线（硬规范）
 

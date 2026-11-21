@@ -78,6 +78,8 @@ async function attachMedia({ date, batch, group, input, draftStory, readerStory,
     return relative;
   }
 
+  const indexById = new Map(discussions.map((message, idx) => [message.id, idx + 1]));
+
   for (const message of discussions) {
     const record = byId.get(message.id);
     const text = message.text.trim();
@@ -118,6 +120,17 @@ async function attachMedia({ date, batch, group, input, draftStory, readerStory,
   }
   validateStoryDiscussion(discussions);
   readerStory.discussion = discussions;
+  if (Array.isArray(draftStory.points) && draftStory.points.length) {
+    const mapped = draftStory.points.flatMap(point => {
+      const text = typeof point === 'string' ? point.trim() : typeof point?.text === 'string' ? point.text.trim() : '';
+      if (!text) return [];
+      const rawRefs = Array.isArray(point?.refs) ? point.refs : [];
+      const refs = [...new Set(rawRefs.map(ref => typeof ref === 'number' ? ref : indexById.get(ref))
+        .filter(n => Number.isInteger(n) && n >= 1 && n <= discussions.length))].sort((a, b) => a - b);
+      return [{ text, ...(refs.length ? { refs } : {}) }];
+    });
+    if (mapped.length) readerStory.points = mapped;
+  }
 }
 
 export async function packageDaily({ date, batch: batchArg, external: externalArg, site = publicSite, log = console.log } = {}) {
@@ -179,9 +192,18 @@ export async function packageDaily({ date, batch: batchArg, external: externalAr
       for (const d of dropped) warnings.push(`${where}: emphasis dropped (${d.reason}): ${d.phrase}`);
 
       const resources = sanitizeResources(rawStory.resources, where, warnings);
+      const tldr = typeof rawStory.tldr === 'string' && rawStory.tldr.trim() ? rawStory.tldr.trim() : undefined;
+      const fallbackPoints = Array.isArray(rawStory.points) && rawStory.points.length
+        ? rawStory.points.flatMap(point => {
+            const text = typeof point === 'string' ? point.trim() : typeof point?.text === 'string' ? point.text.trim() : '';
+            return text ? [{ text }] : [];
+          })
+        : [];
       const story = {
         category: rawStory.category.trim(),
         title: rawStory.title.trim(),
+        ...(tldr ? { tldr } : {}),
+        ...(fallbackPoints.length ? { points: fallbackPoints } : {}),
         text: rawStory.text.trim(),
         emphasis: kept,
         aiComment: rawStory.aiComment.trim(),
@@ -218,8 +240,9 @@ export async function packageDaily({ date, batch: batchArg, external: externalAr
   let combinedIssue = issues[0];
   if (externalArg) {
     const extDraft = await optionalJson(path.join(path.resolve(externalArg), 'reviewed-final.json'));
+    const extSelection = await optionalJson(path.join(path.resolve(externalArg), 'selection.json'));
     if (extDraft) {
-      combinedIssue = mergeExternalEditions(issues, [readerReport(extDraft)]).find(item => item.date === date) || issues[0];
+      combinedIssue = mergeExternalEditions(issues, [readerReport(extDraft, extSelection)]).find(item => item.date === date) || issues[0];
     }
   }
   const botInput = buildDailyBotInput(combinedIssue, { date, site, preview: true });
