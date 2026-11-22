@@ -174,10 +174,10 @@ const site = 'https://agent-hub-community.github.io/newspaper/';
 const previewTitle = '日报导览（链接待上线核验）', publishedTitle = '日报已上线';
 
 export function publishedMessage(draft) {
-  const [first, ...rest] = draft.split('\n');
-  if (first.endsWith(publishedTitle)) return draft;
-  if (!first.endsWith(previewTitle)) throw new Error(`Unexpected first line of the group-message draft: ${first}`);
-  return [first.slice(0, -previewTitle.length) + publishedTitle, ...rest].join('\n');
+  const first = draft.split('\n', 1)[0] || '';
+  if (first.includes(publishedTitle)) return draft;
+  if (!first.includes(previewTitle)) throw new Error(`Unexpected first line of the group-message draft: ${first}`);
+  return draft.replaceAll(previewTitle, publishedTitle);
 }
 
 export function commitSubject(date) {
