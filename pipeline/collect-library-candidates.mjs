@@ -9,7 +9,7 @@ import { readFile, readdir, mkdir, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { zstdDecompressSync } from 'node:zlib';
 import path from 'node:path';
-import { extractLinks } from '../scripts/package-month-resources.mjs';
+import { extractLinks } from '../lib/extract-links.mjs';
 import { load, rootDir as root } from '../lib/newspaper-root.mjs';
 import { loadChatDays } from './chat-days.mjs';
 import { chatGroups } from './chat-groups.mjs';
@@ -94,7 +94,7 @@ if (process.env.WX_ACTIVITY_HOME) {
     }
     if (senders.size !== 1) return null;
     const [username] = senders;
-    if (!senderIds.has(username)) senderIds.set(username, `sharer-${String(senderIds.size + 1).padStart(3, '0')}`);
+    if (!senderIds.has(username)) senderIds.set(username, createHash('sha256').update(username).digest('hex').slice(0, 12));
     const key = senderIds.get(username);
     if (!members[key]) {
       const person = contact.prepare('SELECT small_head_url, big_head_url FROM contact WHERE username = ?').get(username);

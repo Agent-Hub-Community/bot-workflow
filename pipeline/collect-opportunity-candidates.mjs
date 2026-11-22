@@ -7,7 +7,7 @@
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { extractLinks } from '../scripts/package-month-resources.mjs';
+import { extractLinks } from '../lib/extract-links.mjs';
 import { load, rootDir as root } from '../lib/newspaper-root.mjs';
 import { loadChatDays } from './chat-days.mjs';
 
