@@ -13,4 +13,5 @@ export const chatrooms = {
   'group-6': 'GROUP-6-CHATROOM-ID@chatroom',
   'group-7': 'GROUP-7-CHATROOM-ID@chatroom',
   'group-8': 'GROUP-8-CHATROOM-ID@chatroom',
+  'group-9': 'GROUP-9-CHATROOM-ID@chatroom',
 };

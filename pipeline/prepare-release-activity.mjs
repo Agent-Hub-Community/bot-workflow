@@ -44,7 +44,6 @@ export async function prepareReleaseActivity(batch, {
       pages: pageGroups(date).map(group => ({ ...group, section: '今日讨论', heading: '待写', theme: '', note: date, stories: [] })),
     }];
   }
-  const end = startOf(date) + 86400;
   const cache = JSON.parse(await readFile(path.join(home, '.wx-cli/cache/_mtimes.json'), 'utf8'));
   const approved = JSON.parse(await readFile(new URL('data/public-activity/snapshot.json', root), 'utf8'));
   const optionalIds = new Set(allGroups.filter(group => group.optionalPage).map(group => group.id));
@@ -53,6 +52,9 @@ export async function prepareReleaseActivity(batch, {
   const groups = knownGroups.filter(group => sectionedIds.has(group.id));
   assert.ok(groups.length, 'Release has no group pages');
   assert.ok(approved.groups.every(group => groups.some(current => current.id === group.id)), 'Release cannot drop an existing activity group');
+  const firstInput = JSON.parse(await readFile(path.join(batch, date, `${groups[0].id}.input.json`), 'utf8'));
+  const parsedCutoff = firstInput.cutoff ? Math.floor(Date.parse(firstInput.cutoff) / 1000) : NaN;
+  const end = Number.isFinite(parsedCutoff) && parsedCutoff >= startOf(date) + 86400 ? parsedCutoff : startOf(date) + 86400;
   let rows = [];
   for (const [source, entry] of Object.entries(cache).filter(([s]) => /^message\/message_\d+\.db$/.test(s))) {
     const db = new DatabaseSync(entry.path, { readOnly: true });
